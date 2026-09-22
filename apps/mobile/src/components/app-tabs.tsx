@@ -1,30 +1,36 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { useColorScheme } from 'react-native';
+import { Platform } from 'react-native';
 
-import { Colors } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const theme = useTheme();
 
   return (
     <NativeTabs
-      backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}>
-      <NativeTabs.Trigger name="index">
+      backgroundColor={Platform.OS === 'ios' ? undefined : theme.background}
+      tintColor={theme.accent}
+      indicatorColor={theme.accentSurface}
+      labelStyle={{ color: theme.textSecondary, selected: { color: theme.accent } }}>
+      <NativeTabs.Trigger
+        name="index"
+        disableAutomaticContentInsets
+        contentStyle={{ backgroundColor: theme.background }}>
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/home.png')}
-          renderingMode="template"
+          sf={{ default: 'house', selected: 'house.fill' }}
+          md={{ default: 'home', selected: 'home_filled' }}
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="explore">
-        <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger
+        name="apps"
+        disableAutomaticContentInsets
+        contentStyle={{ backgroundColor: theme.background }}>
+        <NativeTabs.Trigger.Label>Apps</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/explore.png')}
-          renderingMode="template"
+          sf={{ default: 'square.grid.2x2', selected: 'square.grid.2x2.fill' }}
+          md={{ default: 'apps', selected: 'apps' }}
         />
       </NativeTabs.Trigger>
     </NativeTabs>
