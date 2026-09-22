@@ -84,6 +84,11 @@ class HitLog:
         print(f"{DIM}({elapsed:.1f}s){RESET}\n", flush=True)
         self._append("answer", None, text, latency=elapsed)
 
+    def used(self, module: str, tool: str, seconds: float) -> None:
+        """A module ran. Worth a line, and worth a row in the log file."""
+        print(f"{DIM}  · {module}.{tool} ({seconds:.1f}s){RESET}", flush=True)
+        self._append("module", None, f"{module}.{tool}", latency=seconds)
+
     def timeout(self) -> None:
         print(f"{DIM}  (no question — back to listening){RESET}\n", flush=True)
 

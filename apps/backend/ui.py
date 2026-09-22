@@ -363,6 +363,10 @@ class UiLog(HitLog):
         self._post(self.app.finish_answer, elapsed)
         self._append("answer", None, text, latency=elapsed)
 
+    def used(self, module: str, tool: str, seconds: float) -> None:
+        self._post(self.app.add_system, f"{module}.{tool} ({seconds:.1f}s)")
+        self._append("module", None, f"{module}.{tool}", latency=seconds)
+
     def timeout(self) -> None:
         self._post(self.app.show_timeout)
 

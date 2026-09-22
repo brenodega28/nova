@@ -13,6 +13,9 @@ choice and answers 404 for anywhere outside the United States.
 The tools return the sentence to be spoken as well as the numbers behind it. That
 is deliberate: a model asked to phrase a temperature will sooner or later phrase
 one nobody measured, so the facts are worded here and the model only relays them.
+
+Failures raise :class:`sdk.ModuleError` with a spoken half, which the runtime
+turns into a refusal the assistant can read out.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date
+
+from sdk import ModuleError
 
 GEOCODER = "geocoding-api.open-meteo.com"
 FORECASTER = "api.open-meteo.com"
@@ -79,16 +84,10 @@ FEELS_DIFFERENT = 3.0
 WORTH_MENTIONING_RAIN = 30
 
 
-class WeatherError(RuntimeError):
-    """Something went wrong that the speaker should hear about."""
-
-    def __init__(self, message: str, spoken: str):
-        super().__init__(message)
-        self.spoken = spoken
-
-
 def describe(code: int | None) -> str:
     """Turn a WMO weather code into something worth saying out loud."""
+    if code is None:
+        return "hard to say"
     return CONDITIONS.get(code, "hard to say")
 
 
@@ -105,26 +104,26 @@ def fetch_json(host: str, path: str, params: dict, timeout: float) -> dict:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = response.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        raise WeatherError(
+        raise ModuleError(
             f"{host} answered {exc.code}", "The weather service turned me down."
         ) from exc
     except urllib.error.URLError as exc:
-        raise WeatherError(
+        raise ModuleError(
             f"cannot reach {host}: {exc.reason}", "I couldn't reach the weather service."
         ) from exc
     except TimeoutError as exc:
-        raise WeatherError(
+        raise ModuleError(
             f"{host} timed out", "The weather service took too long."
         ) from exc
 
     if len(payload) > MAX_BYTES:
-        raise WeatherError(
+        raise ModuleError(
             f"{host} sent more than {MAX_BYTES} bytes", "That answer was too big."
         )
     try:
         return json.loads(payload)
     except ValueError as exc:
-        raise WeatherError(
+        raise ModuleError(
             f"{host} sent something that is not JSON", "I got a garbled answer."
         ) from exc
 
@@ -139,7 +138,7 @@ def locate(place: str, timeout: float) -> dict:
     )
     results = found.get("results") or []
     if not results:
-        raise WeatherError(
+        raise ModuleError(
             f"no place called {place!r}", f"I couldn't find anywhere called {place}."
         )
     first = results[0]
@@ -245,7 +244,7 @@ def forecast(location: str, days: int, units: str, timeout: float) -> dict:
     daily = answer.get("daily") or {}
     stamps = daily.get("time") or []
     if not stamps:
-        raise WeatherError(
+        raise ModuleError(
             "no daily forecast came back", "I couldn't get a forecast for that place."
         )
 
@@ -277,9 +276,3 @@ def forecast(location: str, days: int, units: str, timeout: float) -> dict:
         "speech": " ".join(said),
         "data": {"place": place["label"], "units": units, "days": entries},
     }
-
-
-TOOLS = {
-    "current_conditions": current_conditions,
-    "forecast": forecast,
-}

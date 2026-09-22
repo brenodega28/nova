@@ -1,5 +1,5 @@
 {
-  "venvPath": "apps/listener",
+  "venvPath": "apps/backend",
   "venv": ".venv",
   "extraPaths": ["apps/sdk/src"],
   "typeCheckingMode": "standard",

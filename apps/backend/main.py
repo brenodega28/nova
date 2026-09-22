@@ -20,12 +20,16 @@ import random
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 import audio
-import persona
+import broker
 import model
+import persona
 from hit_log import HitLog
 from listener import Listener
+
+STICKY_SECONDS = 120.0
 
 
 
@@ -112,6 +116,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=model.DEFAULT_HISTORY_TURNS,
         help="how many past exchanges the model is reminded of",
+    )
+    parser.add_argument(
+        "--no-modules",
+        action="store_true",
+        help="ignore installed modules and just converse",
     )
     parser.add_argument(
         "--no-llm",
@@ -206,20 +215,91 @@ def resolve_device(requested: str) -> str:
     return "cpu"
 
 
-def answer_aloud(brain: model.Model, talker, log: HitLog):
-    """Hand the question to the model and speak the answer as it arrives.
+def answer_aloud(
+    brain: model.Model,
+    talker,
+    log: HitLog,
+    registry: broker.Registry | None = None,
+    runner: broker.Runner | None = None,
+) -> Callable[[str], None]:
+    """Answer the question, from a module where one fits and from the model where none does.
 
-    Generation runs on its own thread rather than being pulled a sentence at a
-    time, so a long answer finishes generating while the opening sentences are
-    still being spoken instead of stalling between them.
+    A question is routed to a module on its declared phrases alone — deterministic,
+    and cheap enough not to bother the model with. The model's job is the half it
+    is actually good at: reading "will it rain in Porto over the next three days"
+    and filling in ``location`` and ``days``. It never chooses whether a module
+    runs, only how it is called, and the module refuses anything it did not
+    declare.
 
-    The gate is held shut for the whole answer rather than per sentence, so the
-    microphone never hears her thinking out loud between them.
+    When a phrase matched and the model still declines to call a tool, it has
+    usually asked for something it needs — "which city?" — and that question is
+    worth speaking as-is. When the module was only a guess at a follow-up, a
+    declined tool means the guess was wrong, and the question goes to conversation
+    instead. The model is asked once either way.
+
+    Conversation is unchanged: generation runs on its own thread, so a long answer
+    finishes generating while the opening sentences are still being spoken. The
+    gate is held shut across the whole answer, so the microphone never hears her
+    thinking out loud between sentences.
     """
 
-    def handle(question: str) -> None:
-        log.thinking()
-        started = time.time()
+    def say_once(text: str) -> None:
+        hold = talker.speaking() if talker else contextlib.nullcontext()
+        with hold:
+            log.answer_chunk(text)
+            if talker:
+                talker.say(text, blocking=True)
+
+    recent: dict = {"module": None, "at": 0.0}
+
+    def route(question: str) -> tuple[broker.Installed | None, bool]:
+        """Which module should see this, and how sure are we.
+
+        A follow-up carries none of the words that routed the first question —
+        "and in Madrid?" names no weather at all — so when nothing matches and a
+        module answered a moment ago, that module gets offered the question. It is
+        a guess, and the second return value says so.
+        """
+        if registry is None:
+            return None, False
+        matched = registry.match(question)
+        if matched is not None:
+            return matched, False
+        last = recent["module"]
+        if last is not None and time.time() - recent["at"] <= STICKY_SECONDS:
+            return last, True
+        return None, False
+
+    def from_module(question: str, started: float) -> bool:
+        if registry is None or runner is None:
+            return False
+        module, guessed = route(question)
+        if module is None:
+            return False
+        tools = runner.schemas(module)
+        if not tools:
+            return False
+
+        decision = brain.decide(question, tools)
+        if decision.tool:
+            tool = decision.tool.rpartition(".")[2]
+            answer = runner.call(module, tool, decision.args)
+            log.used(module.name, tool, answer.seconds)
+            spoken = answer.speech or f"{module.name} had nothing to say."
+            recent.update(module=module, at=time.time())
+        elif guessed:
+            return False
+        elif decision.speech:
+            spoken = decision.speech
+        else:
+            return False
+
+        say_once(spoken)
+        log.answer(spoken, time.time() - started)
+        brain.remember(question, spoken)
+        return True
+
+    def converse(question: str, started: float) -> None:
         sentences: queue.Queue = queue.Queue()
 
         def generate() -> None:
@@ -251,6 +331,16 @@ def answer_aloud(brain: model.Model, talker, log: HitLog):
         log.answer(" ".join(said), time.time() - started)
         if failure is not None:
             raise failure
+
+    def handle(question: str) -> None:
+        log.thinking()
+        started = time.time()
+        try:
+            if from_module(question, started):
+                return
+        except (model.ModelError, broker.Broken) as exc:
+            log.error(f"module route failed: {exc}")
+        converse(question, started)
 
     return handle
 
@@ -313,6 +403,15 @@ def assemble(args, log: HitLog, progress) -> Listener:
         progress(f"llm '{args.llm_model}' at {args.llm_host}")
         brain.load()
 
+    registry = runner = None
+    if not args.no_modules and not args.no_llm:
+        registry = broker.Registry()
+        runner = broker.Runner(python=sys.executable)
+        for complaint in registry.broken:
+            log.error(f"module skipped — {complaint}")
+        if registry.modules:
+            progress(f"modules {', '.join(sorted(registry.modules))}")
+
     lend_tqdm_a_plain_lock()
     import whisper
 
@@ -345,7 +444,9 @@ def assemble(args, log: HitLog, progress) -> Listener:
         on_wake_command=args.on_wake,
         wake_reply=speak,
         muted_until=muted_until,
-        on_question=answer_aloud(brain, talker, log) if brain else None,
+        on_question=(
+            answer_aloud(brain, talker, log, registry, runner) if brain else None
+        ),
         acknowledge=acknowledge,
         greeting=greeting,
     )

@@ -1,71 +1,31 @@
+manifest_version = 1
+
 [module]
 name = "weather"
 version = "0.1.0"
-entry = "weather.py"
 summary = "Current conditions and a short forecast for anywhere in the world."
 phrases = [
     "weather",
     "forecast",
     "temperature",
+    "degrees",
+    "rain",
+    "snow",
+    "wind",
+    "sunny",
+    "cloudy",
+    "humid",
+    "umbrella",
     "how hot",
     "how cold",
-    "is it going to rain",
-    "raining",
+    "how warm",
 ]
 
 [grants]
 egress = ["geocoding-api.open-meteo.com", "api.open-meteo.com"]
-read = []
-write = []
-secrets = []
 timeout_seconds = 10
 consequence = "read-only"
 confirm = false
 
 [settings]
-home = "Lisbon"
 units = "metric"
-
-[tools.current_conditions]
-summary = "Temperature, what it feels like, and the conditions outside right now."
-
-[tools.current_conditions.args.location]
-type = "string"
-required = false
-default_from = "settings.home"
-max_length = 64
-pattern = "^[\\w ,.'’-]+$"
-description = "Town, city or region. Leave out to use the speaker's home."
-
-[tools.current_conditions.args.units]
-type = "enum"
-values = ["metric", "imperial"]
-required = false
-default_from = "settings.units"
-description = "Celsius and kilometres, or Fahrenheit and miles."
-
-[tools.forecast]
-summary = "The next few days: conditions, high and low, and the chance of rain."
-
-[tools.forecast.args.location]
-type = "string"
-required = false
-default_from = "settings.home"
-max_length = 64
-pattern = "^[\\w ,.'’-]+$"
-description = "Town, city or region. Leave out to use the speaker's home."
-
-[tools.forecast.args.days]
-type = "integer"
-required = false
-default = 3
-minimum = 1
-maximum = 7
-description = "How many days to report, counting today."
-
-[tools.forecast.args.units]
-type = "enum"
-values = ["metric", "imperial"]
-required = false
-default_from = "settings.units"
-description = "Celsius and kilometres, or Fahrenheit and miles."

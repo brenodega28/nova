@@ -27,12 +27,21 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 
 import persona
 
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3:14b"
 DEFAULT_SYSTEM = persona.SYSTEM
+CHOOSING = (
+    "You decide which tool answers the user's question and fill in its arguments. "
+    "You have no live information of your own: when a tool covers the question, "
+    "call it — never answer from memory, and never invent a figure a tool would "
+    "have measured. If an argument you need was not said and cannot be inferred "
+    "from the conversation, do not call the tool; ask for it in one short "
+    "sentence instead."
+)
 DEFAULT_HISTORY_TURNS = 6
 DEFAULT_TIMEOUT = 120.0
 
@@ -45,6 +54,21 @@ BULLET = re.compile(r"^\s*(?:[-•·]|\d+[.)])\s+", re.M)
 
 class ModelError(RuntimeError):
     """The model could not be reached, or refused to answer."""
+
+
+@dataclass
+class Decision:
+    """What the model did when it was offered a module's tools.
+
+    Exactly one of these is interesting. ``tool`` means it wants a module run and
+    has filled in the arguments; ``speech`` means it answered in words instead —
+    which covers both "that is not what these tools are for" and "I need to know
+    which city you mean", and both are worth saying out loud.
+    """
+
+    tool: str | None = None
+    args: dict = field(default_factory=dict)
+    speech: str = ""
 
 
 def speakable(text: str) -> str:
@@ -136,11 +160,23 @@ class Model:
             payload["think"] = self.think
         return payload
 
-    def _messages(self, question: str) -> list[dict[str, str]]:
+    def _messages(
+        self, question: str, system: str | None = None
+    ) -> list[dict[str, str]]:
         with self._lock:
             history = list(self._history)
-        messages = [{"role": "system", "content": self.system}] if self.system else []
+        prompt = self.system if system is None else system
+        messages = [{"role": "system", "content": prompt}] if prompt else []
         return messages + history + [{"role": "user", "content": question}]
+
+    def remember(self, question: str, answer: str) -> None:
+        """Record an exchange the model did not generate itself.
+
+        A module's answer never passed through the model, so nothing would
+        otherwise remember it, and the follow-up "and in Porto?" would have
+        nothing to resolve against.
+        """
+        self._remember(question, answer)
 
     def _remember(self, question: str, answer: str) -> None:
         if not answer:
@@ -192,6 +228,50 @@ class Model:
     def answer(self, question: str) -> str:
         """Answer ``question`` and return the whole thing."""
         return " ".join(self.stream(question))
+
+    def decide(self, question: str, tools: list[dict]) -> Decision:
+        """Offer the model a module's tools and see what it wants to do.
+
+        One round trip, never streamed, and never with thinking on: picking a
+        tool and filling two arguments is a mechanical choice, and reasoning
+        about it out loud only costs the speaker silence. The conversation so far
+        is included, so "and in Porto?" still resolves.
+
+        :data:`CHOOSING` replaces the persona prompt for this one call, and that
+        matters more than it looks. Asked to be brief and conversational while
+        holding a tool it could use, the model will cheerfully answer the question
+        itself and invent the temperature — the persona prompt is an instruction to
+        talk, which is the opposite of what is wanted here.
+        """
+        question = question.strip()
+        if not question or not tools:
+            return Decision()
+
+        payload = self._payload(self._messages(question, CHOOSING), stream=False)
+        payload["tools"] = tools
+        if self.supports_thinking():
+            payload["think"] = False
+
+        with self._post("/api/chat", payload) as response:
+            answered = json.load(response)
+        if answered.get("error"):
+            raise ModelError(str(answered["error"]))
+
+        message = answered.get("message") or {}
+        calls = message.get("tool_calls") or []
+        if calls:
+            function = (calls[0] or {}).get("function") or {}
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    arguments = {}
+            return Decision(
+                tool=str(function.get("name") or ""),
+                args=arguments if isinstance(arguments, dict) else {},
+            )
+        return Decision(speech=speakable(message.get("content") or ""))
 
 
 if __name__ == "__main__":
