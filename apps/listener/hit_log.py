@@ -103,7 +103,7 @@ class HitLog:
         if not self.path:
             return
         started_at = utterance.started_at if utterance else time.time()
-        entry = {
+        entry: dict[str, object] = {
             "timestamp": datetime.fromtimestamp(
                 started_at, tz=timezone.utc
             ).isoformat(),

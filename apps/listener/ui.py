@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from typing import Protocol
 
 import persona
 from rich.markup import escape
@@ -34,6 +35,18 @@ from textual.theme import Theme
 from textual.widgets import Footer, Static
 
 from hit_log import HitLog
+
+class Listening(Protocol):
+    """What the interface needs of a listener: run it, and ask it to stop.
+
+    Stated as a protocol rather than an import so the screen stays ignorant of
+    the wake-word machinery it happens to be showing.
+    """
+
+    stop_event: threading.Event
+
+    def run(self) -> int: ...
+
 
 LOADING = "loading"
 IDLE = "idle"
@@ -159,15 +172,15 @@ class AssistantApp(App):
 
     def __init__(
         self,
-        build: Callable[["AssistantApp"], object],
+        build: Callable[["AssistantApp"], Listening],
         wake_word: str = persona.WAKE_WORD,
         assistant_name: str = persona.NAME,
     ):
         super().__init__()
         self._assemble_listener = build
+        self.listener: Listening | None = None
         self.wake_word = wake_word
         self.assistant_name = assistant_name
-        self.listener = None
         self._listener_thread: threading.Thread | None = None
         self._winding_down = False
         self._listener_started = False

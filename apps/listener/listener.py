@@ -151,7 +151,7 @@ class Listener:
         self.greeting = greeting
 
         self.partials = LatestSlot()
-        self.utterances: queue.Queue[Utterance] = queue.Queue()
+        self.utterances: queue.Queue[Utterance | None] = queue.Queue()
         self.stop_event = threading.Event()
 
         self._lock = threading.Lock()

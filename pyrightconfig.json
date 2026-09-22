@@ -1,0 +1,8 @@
+{
+  "venvPath": "apps/listener",
+  "venv": ".venv",
+  "extraPaths": ["apps/sdk/src"],
+  "typeCheckingMode": "standard",
+  "include": ["apps", "modules"],
+  "exclude": ["**/.venv", "**/__pycache__"]
+}
