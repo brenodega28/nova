@@ -1,98 +1,94 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
+import { AssistantAvatar } from '@/components/nova/assistant-avatar';
+import { ConfigRow } from '@/components/nova/config-row';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import {
+  AssistantStateCopy,
+  MockedAssistantState,
+  MockedConfiguration,
+} from '@/constants/assistant';
+import { HorizontalPadding, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+  const theme = useTheme();
+  const safeAreaInsets = useSafeAreaInsets();
+  const state = MockedAssistantState;
+  const copy = AssistantStateCopy[state];
 
-        <ThemedText type="code" style={styles.code}>
-          get started
+  return (
+    <ScrollView
+      style={[styles.scrollView, { backgroundColor: theme.background }]}
+      contentInsetAdjustmentBehavior="never"
+      automaticallyAdjustContentInsets={false}
+      contentContainerStyle={[styles.contentContainer, { paddingTop: safeAreaInsets.top }]}>
+      <View style={styles.content}>
+        <ThemedText type="wordmark" themeColor="textSecondary">
+          Nova
         </ThemedText>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        <View style={styles.hero}>
+          <AssistantAvatar pulsing={state === 'listening'} />
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+          <View style={styles.heroCopy}>
+            <ThemedText type="stateLabel">{copy.label}</ThemedText>
+            <ThemedText type="rowValue" themeColor="textSecondary" style={styles.caption}>
+              {copy.caption}
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText type="sectionLabel" themeColor="textSecondary">
+            Configuration
+          </ThemedText>
+
+          <View style={styles.rows}>
+            {MockedConfiguration.map((entry) => (
+              <ConfigRow key={entry.key} entry={entry} />
+            ))}
+          </View>
+        </View>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scrollView: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
+  contentContainer: {
+    flexGrow: 1,
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
+    paddingHorizontal: HorizontalPadding,
+  },
+  content: {
+    width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
     alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
   },
-  title: {
-    textAlign: 'center',
+  hero: {
+    alignItems: 'center',
+    marginTop: 52,
   },
-  code: {
-    textTransform: 'uppercase',
+  heroCopy: {
+    alignItems: 'center',
+    marginTop: 26,
+    gap: Spacing.one,
   },
-  stepContainer: {
-    gap: Spacing.three,
+  caption: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  section: {
     alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+    marginTop: 44,
+    gap: 14,
+  },
+  rows: {
+    gap: 12,
   },
 });
