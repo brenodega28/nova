@@ -30,6 +30,7 @@ from textual.containers import Center, VerticalScroll
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
+from textual.theme import Theme
 from textual.widgets import Footer, Static
 
 from hit_log import HitLog
@@ -56,6 +57,18 @@ FACES = {
     SPEAKING: ("●", "▽○▽●", "speaking"),
     BROKEN: ("x", "·", "trouble"),
 }
+
+BLUE = Theme(
+    name="nova-blue",
+    primary="#0178d4",
+    secondary="#004578",
+    accent="#4aa8ff",
+    warning="#7fb2ff",
+    error="#ba3c5b",
+    success="#4ebf71",
+    foreground="#e0e0e0",
+    dark=True,
+)
 
 TICK_SECONDS = 0.22
 FACE_WIDTH = 18
@@ -176,6 +189,8 @@ class AssistantApp(App):
         return self.query_one(Chat)
 
     def on_mount(self) -> None:
+        self.register_theme(BLUE)
+        self.theme = BLUE.name
         if self._listener_started:
             return
         self._listener_started = True
