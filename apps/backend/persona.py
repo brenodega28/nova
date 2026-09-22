@@ -4,6 +4,7 @@
 
     persona.NAME              # what she is called, and answers to
     persona.WAKE_WORD         # what the scanner listens for
+    persona.MODEL             # the model she thinks with
     persona.MISHEARINGS       # what Whisper hears instead, and should accept
     persona.VOICE             # the Piper voice she speaks with
     persona.SYSTEM            # the prompt that shapes her answers
@@ -11,10 +12,13 @@
     persona.WAKE_REPLY        # what she says the instant she hears her name
     persona.THINKING_REPLIES  # what she says while the model is working
 
-Nothing else in the project spells out her name, her prompt, her voice, or a
-single word she says unprompted. Change :data:`NAME` and every line that mentions
-it follows. The command line can override any of this for one session; this is
-what she is when nobody asks for anything different.
+Nothing else in the project spells out her name, her prompt, her voice, the model
+she thinks with, or a single word she says unprompted. Change :data:`NAME` and
+every line that mentions it follows.
+
+:data:`MODEL` is the one to weigh on a smaller machine. A 14b model wants about
+10 GB resident, which on 16 GB leaves nothing for Whisper; ``qwen3:4b`` is the
+trade to make there, and module routing does not depend on the larger one.
 
 :data:`MISHEARINGS` is the one part a rename does not carry over. It lists the
 ways Whisper tends to mangle this particular name, which depends on how the name
@@ -30,6 +34,11 @@ WAKE_WORD = NAME.lower()
 MISHEARINGS = ("olly", "oli", "oly", "olli", "ollee", f"{WAKE_WORD}'s")
 
 VOICE = "en_US-ryan-medium"
+
+MODEL = "qwen3:14b"
+HOST = "http://localhost:11434"
+THINK = False
+HISTORY_TURNS = 6
 
 SYSTEM = (
     f"You are {NAME}, a voice assistant. Every reply you give is spoken aloud, so "

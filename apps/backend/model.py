@@ -31,9 +31,7 @@ from dataclasses import dataclass, field
 
 import persona
 
-DEFAULT_HOST = "http://localhost:11434"
-DEFAULT_MODEL = "qwen3:14b"
-DEFAULT_SYSTEM = persona.SYSTEM
+DEFAULT_TIMEOUT = 120.0
 CHOOSING = (
     "You decide which tool answers the user's question and fill in its arguments. "
     "You have no live information of your own: when a tool covers the question, "
@@ -42,9 +40,6 @@ CHOOSING = (
     "from the conversation, do not call the tool; ask for it in one short "
     "sentence instead."
 )
-DEFAULT_HISTORY_TURNS = 6
-DEFAULT_TIMEOUT = 120.0
-
 SENTENCE_END = re.compile(r"[.!?…]['\"”’)\]]*(?=\s)|\n")
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.S)
 CODE_FENCE = re.compile(r"```.*?```", re.S)
@@ -96,11 +91,11 @@ class Model:
 
     def __init__(
         self,
-        name: str = DEFAULT_MODEL,
-        host: str = DEFAULT_HOST,
-        system: str = DEFAULT_SYSTEM,
-        think: bool = False,
-        history_turns: int = DEFAULT_HISTORY_TURNS,
+        name: str = persona.MODEL,
+        host: str = persona.HOST,
+        system: str = persona.SYSTEM,
+        think: bool = persona.THINK,
+        history_turns: int = persona.HISTORY_TURNS,
         timeout: float = DEFAULT_TIMEOUT,
     ):
         self.name = name

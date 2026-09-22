@@ -10,6 +10,11 @@ Capture runs on whichever thread calls :meth:`Listener.run`, wake scanning on a
 second, and the question transcription on a third. The wake scanner keeps only
 the newest partial, so a slow pass never leaves it working through stale audio.
 
+Which Whisper models do the two jobs is set here: a small one to spot the wake
+word inside a fraction of a second, a large one to transcribe the question, where
+accuracy matters and latency does not. On a machine without a GPU the large one
+costs seconds, and ``turbo`` is the trade to make.
+
 Interrupt handling is installed only when :meth:`Listener.run` is called on the
 main thread, since signals cannot be registered anywhere else — under a UI that
 owns the main thread, quitting is the UI's job.
@@ -21,7 +26,6 @@ import difflib
 import queue
 import re
 import signal
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -29,6 +33,14 @@ from collections.abc import Callable, Sequence
 import persona
 from audio import AudioCapture, Utterance
 from hit_log import HitLog
+
+WAKE_MODEL = "base.en"
+QUESTION_MODEL = "large"
+LANGUAGE = "en"
+
+QUESTION_TIMEOUT = 10.0
+REARM_AFTER = 1.5
+WAKE_CONFIDENCE = 0.5
 
 IDLE = "idle"
 AWAITING_QUESTION = "awaiting_question"
@@ -121,12 +133,11 @@ class Listener:
         log: HitLog,
         wake_word: str = persona.WAKE_WORD,
         wake_variants: Sequence[str] = persona.MISHEARINGS,
-        language: str | None = "en",
+        language: str | None = LANGUAGE,
         fp16: bool = False,
-        question_timeout: float = 10.0,
-        rearm_after: float = 1.5,
-        max_no_speech: float = 0.5,
-        on_wake_command: str | None = None,
+        question_timeout: float = QUESTION_TIMEOUT,
+        rearm_after: float = REARM_AFTER,
+        max_no_speech: float = WAKE_CONFIDENCE,
         wake_reply: Callable[[], None] | None = None,
         muted_until: Callable[[], float] | None = None,
         on_question: Callable[[str], None] | None = None,
@@ -143,7 +154,6 @@ class Listener:
         self.question_timeout = question_timeout
         self.rearm_after = rearm_after
         self.max_no_speech = max_no_speech
-        self.on_wake_command = on_wake_command
         self.wake_reply = wake_reply
         self.muted_until = muted_until or (lambda: 0.0)
         self.on_question = on_question
@@ -231,16 +241,6 @@ class Listener:
                 self.wake_reply()
             except Exception as exc:
                 self.log.error(f"wake reply failed: {exc}")
-        if self.on_wake_command:
-            try:
-                subprocess.Popen(
-                    self.on_wake_command,
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception as exc:
-                self.log.error(f"on-wake command failed: {exc}")
 
     def _spoken_past_wake_word(self, utterance: Utterance) -> bool:
         """Did the burst that woke us carry a question of its own?

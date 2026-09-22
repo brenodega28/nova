@@ -9,6 +9,10 @@ can react before the speaker has finished. A complete utterance is emitted once
 the speaker stops. Both carry ``started_at``, the moment their burst of speech
 began, so a listener can tell which partials and which utterance belong
 together.
+
+How loud counts as speech, how long a gap ends an utterance and how much audio a
+rolling window holds are all set here, at the top, because this is the file that
+reads the microphone. Change them here rather than passing them down.
 """
 
 from __future__ import annotations
@@ -26,6 +30,14 @@ SAMPLE_RATE = 16_000
 BLOCK_SECONDS = 0.03
 PREROLL_SECONDS = 0.5
 CALIBRATION_SECONDS = 1.0
+
+SENSITIVITY = 3.0
+SILENCE_SECONDS = 0.35
+MIN_UTTERANCE = 0.25
+MAX_UTTERANCE = 15.0
+WINDOW_SECONDS = 1.5
+WINDOW_INTERVAL = 0.25
+INPUT_DEVICE = None
 
 
 @dataclass
@@ -76,13 +88,13 @@ class AudioCapture:
     def __init__(
         self,
         *,
-        sensitivity: float = 3.0,
-        silence: float = 0.35,
-        min_utterance: float = 0.25,
-        max_utterance: float = 15.0,
-        window: float = 1.5,
-        window_interval: float = 0.25,
-        input_device: str | int | None = None,
+        sensitivity: float = SENSITIVITY,
+        silence: float = SILENCE_SECONDS,
+        min_utterance: float = MIN_UTTERANCE,
+        max_utterance: float = MAX_UTTERANCE,
+        window: float = WINDOW_SECONDS,
+        window_interval: float = WINDOW_INTERVAL,
+        input_device: str | int | None = INPUT_DEVICE,
     ):
         self.sensitivity = sensitivity
         self.silence = silence

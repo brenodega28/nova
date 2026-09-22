@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Command line entry point: listen for the wake word, answer the question aloud.
+"""Entry point: listen for the wake word, answer the question out loud.
 
-Her name, prompt, voice and every phrase she says unprompted live in
-:mod:`persona`; nothing here spells any of it out.
+    uv run main.py
 
-python main.py
-python main.py --plain           # console log instead of the interface
-python main.py --llm-model zero:latest
-python main.py --no-llm          # transcribe only, do not answer
+There is nothing to configure here and no command line to keep in step. Every
+choice lives with the thing it governs — who she is and which model she thinks
+with in :mod:`persona`, how the microphone is read in :mod:`audio`, which Whisper
+models run and how long she waits in :mod:`listener`, what gets logged in
+:mod:`hit_log` — so each one has exactly one home.
+
+Set :data:`INTERFACE` to ``False`` for scrolling console output instead of the
+full-screen interface, which is easier to read when something is going wrong.
 """
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import os
 import queue
@@ -27,187 +29,16 @@ import broker
 import model
 import persona
 from hit_log import HitLog
-from listener import Listener
+from listener import QUESTION_MODEL, WAKE_MODEL, Listener
 
+INTERFACE = True
 STICKY_SECONDS = 120.0
 
 
-
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Listen for a wake word, then transcribe what follows."
-    )
-    parser.add_argument(
-        "--wake-word", default=persona.WAKE_WORD, help="word to watch for"
-    )
-    parser.add_argument(
-        "--wake-model",
-        default="base.en",
-        help="small, fast Whisper model used to spot the wake word",
-    )
-    parser.add_argument(
-        "--model",
-        default="large",
-        help="Whisper model used for the question after the wake word",
-    )
-    parser.add_argument(
-        "--device",
-        default="auto",
-        choices=("auto", "cpu", "cuda", "mps"),
-        help="torch device for both models",
-    )
-    parser.add_argument(
-        "--language",
-        default="en",
-        help="spoken language, or 'auto' to let Whisper detect it",
-    )
-    parser.add_argument(
-        "--input-device",
-        default=None,
-        help="microphone name or index (see --list-devices)",
-    )
-    parser.add_argument(
-        "--wake-reply",
-        default=persona.WAKE_REPLY,
-        help="spoken the instant the wake word lands ('' for silence)",
-    )
-    parser.add_argument(
-        "--greeting",
-        default=persona.GREETING,
-        help="spoken once the microphone is calibrated ('' for silence)",
-    )
-    parser.add_argument(
-        "--thinking-reply",
-        nargs="*",
-        default=list(persona.THINKING_REPLIES),
-        help="spoken while the model works, picked at random ('' for silence)",
-    )
-    parser.add_argument(
-        "--voice",
-        default=persona.VOICE,
-        help="Piper voice (see python -m piper.download_voices)",
-    )
-    parser.add_argument(
-        "--no-voice", action="store_true", help="never speak, just print"
-    )
-    parser.add_argument(
-        "--llm-model",
-        default=model.DEFAULT_MODEL,
-        help="Ollama model that answers the question (see 'ollama list')",
-    )
-    parser.add_argument(
-        "--llm-host",
-        default=model.DEFAULT_HOST,
-        help="where Ollama is listening",
-    )
-    parser.add_argument(
-        "--system",
-        default=persona.SYSTEM,
-        help="system prompt handed to the model",
-    )
-    parser.add_argument(
-        "--think",
-        action="store_true",
-        help="let the model reason before answering (slower, silent while it does)",
-    )
-    parser.add_argument(
-        "--history-turns",
-        type=int,
-        default=model.DEFAULT_HISTORY_TURNS,
-        help="how many past exchanges the model is reminded of",
-    )
-    parser.add_argument(
-        "--no-modules",
-        action="store_true",
-        help="ignore installed modules and just converse",
-    )
-    parser.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="transcribe the question but do not answer it",
-    )
-    parser.add_argument(
-        "--on-wake",
-        default=None,
-        help="shell command run the moment the wake word lands, e.g. 'say yes'",
-    )
-    parser.add_argument(
-        "--wake-confidence",
-        type=float,
-        default=0.5,
-        help="reject a wake hit whose clip scores above this as non-speech",
-    )
-    parser.add_argument(
-        "--question-timeout",
-        type=float,
-        default=10.0,
-        help="seconds to wait for a question before going back to idle",
-    )
-    parser.add_argument(
-        "--window",
-        type=float,
-        default=1.5,
-        help="seconds of audio the wake scanner looks at",
-    )
-    parser.add_argument(
-        "--window-interval",
-        type=float,
-        default=0.25,
-        help="seconds between wake scans while someone is speaking",
-    )
-    parser.add_argument(
-        "--sensitivity",
-        type=float,
-        default=3.0,
-        help="speech gate, as a multiple of the measured noise floor",
-    )
-    parser.add_argument(
-        "--silence",
-        type=float,
-        default=0.35,
-        help="seconds of quiet that end an utterance",
-    )
-    parser.add_argument(
-        "--min-utterance", type=float, default=0.25, help="ignore shorter blips"
-    )
-    parser.add_argument(
-        "--max-utterance",
-        type=float,
-        default=15.0,
-        help="force a transcription after this many seconds of speech",
-    )
-    parser.add_argument("--log", default=None, help="append events to this JSONL file")
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="print every wake scan, not just the hits",
-    )
-    parser.add_argument(
-        "--no-bell", action="store_true", help="do not ring the terminal bell on a hit"
-    )
-    parser.add_argument(
-        "--plain",
-        action="store_true",
-        help="log to the console instead of the full screen interface",
-    )
-    parser.add_argument(
-        "--list-devices", action="store_true", help="list input devices and exit"
-    )
-    args = parser.parse_args(argv)
-
-    if args.language == "auto":
-        args.language = None
-    if args.input_device is not None and args.input_device.isdigit():
-        args.input_device = int(args.input_device)
-    return args
-
-
-def resolve_device(requested: str) -> str:
+def resolve_device() -> str:
+    """The fastest thing torch can see: a GPU where there is one, else the CPU."""
     import torch
 
-    if requested != "auto":
-        return requested
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
@@ -359,128 +190,86 @@ def lend_tqdm_a_plain_lock() -> None:
     tqdm.tqdm.set_lock(threading.RLock())
 
 
-def assemble(args, log: HitLog, progress) -> Listener:
+def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     """Load everything and wire it together, reporting progress as it goes.
 
-    Called on the main thread in plain mode and from the interface's worker
+    Called on the main thread in console mode and from the interface's worker
     thread otherwise, which is why every word of progress goes through ``log``
     rather than straight to stdout.
     """
-    device = resolve_device(args.device)
+    device = resolve_device()
     if device == "mps":
         os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-    talker = None
-    speak = None
-    acknowledge = None
+    import talk
+
+    talker = talk.configure(voice=persona.VOICE)
+    progress(f"voice '{persona.VOICE}'")
+    talker.load()
+
     greeting = None
-    muted_until = None
-    if not args.no_voice:
-        import talk
-
-        talker = talk.configure(voice=args.voice)
-        progress(f"voice '{args.voice}'")
-        talker.load()
-        muted_until = talker.muted_until
-        if args.greeting:
-            greeting = lambda: talker.say(args.greeting, blocking=False)
-        if args.wake_reply:
-            speak = lambda: talker.say(args.wake_reply, blocking=False)
-        if args.thinking_reply and not args.no_llm:
-            acknowledge = lambda: talker.say(
-                random.choice(args.thinking_reply), blocking=False
-            )
-
-    brain = None
-    if not args.no_llm:
-        brain = model.Model(
-            name=args.llm_model,
-            host=args.llm_host,
-            system=args.system,
-            think=args.think,
-            history_turns=args.history_turns,
+    if persona.GREETING:
+        greeting = lambda: talker.say(persona.GREETING, blocking=False)
+    speak = None
+    if persona.WAKE_REPLY:
+        speak = lambda: talker.say(persona.WAKE_REPLY, blocking=False)
+    acknowledge = None
+    if persona.THINKING_REPLIES:
+        acknowledge = lambda: talker.say(
+            random.choice(persona.THINKING_REPLIES), blocking=False
         )
-        progress(f"llm '{args.llm_model}' at {args.llm_host}")
-        brain.load()
 
-    registry = runner = None
-    if not args.no_modules and not args.no_llm:
-        registry = broker.Registry()
-        runner = broker.Runner(python=sys.executable)
-        for complaint in registry.broken:
-            log.error(f"module skipped — {complaint}")
-        if registry.modules:
-            progress(f"modules {', '.join(sorted(registry.modules))}")
+    brain = model.Model()
+    progress(f"llm '{persona.MODEL}' at {persona.HOST}")
+    brain.load()
+
+    registry = broker.Registry()
+    runner = broker.Runner(python=sys.executable)
+    for complaint in registry.broken:
+        log.error(f"module skipped — {complaint}")
+    if registry.modules:
+        progress(f"modules {', '.join(sorted(registry.modules))}")
 
     lend_tqdm_a_plain_lock()
     import whisper
 
-    progress(f"wake model '{args.wake_model}' on {device}")
-    wake_model = whisper.load_model(args.wake_model, device=device)
-    progress(f"question model '{args.model}' on {device}")
-    question_model = whisper.load_model(args.model, device=device)
+    progress(f"wake model '{WAKE_MODEL}' on {device}")
+    wake_model = whisper.load_model(WAKE_MODEL, device=device)
+    progress(f"question model '{QUESTION_MODEL}' on {device}")
+    question_model = whisper.load_model(QUESTION_MODEL, device=device)
 
     return Listener(
         wake_model,
         question_model,
-        capture=audio.AudioCapture(
-            sensitivity=args.sensitivity,
-            silence=args.silence,
-            min_utterance=args.min_utterance,
-            max_utterance=args.max_utterance,
-            window=args.window,
-            window_interval=args.window_interval,
-            input_device=args.input_device,
-        ),
+        capture=audio.AudioCapture(),
         log=log,
-        wake_word=args.wake_word,
-        wake_variants=(
-            persona.MISHEARINGS if args.wake_word == persona.WAKE_WORD else ()
-        ),
-        language=args.language,
         fp16=device in ("cuda", "mps"),
-        question_timeout=args.question_timeout,
-        max_no_speech=args.wake_confidence,
-        on_wake_command=args.on_wake,
         wake_reply=speak,
-        muted_until=muted_until,
-        on_question=(
-            answer_aloud(brain, talker, log, registry, runner) if brain else None
-        ),
+        muted_until=talker.muted_until,
+        on_question=answer_aloud(brain, talker, log, registry, runner),
         acknowledge=acknowledge,
         greeting=greeting,
     )
 
 
-def run_plain(args) -> int:
-    log = HitLog(
-        args.wake_word,
-        path=args.log,
-        verbose=args.verbose,
-        bell=not args.no_bell,
-    )
+def run_console() -> int:
+    log = HitLog(persona.WAKE_WORD)
     try:
-        listener = assemble(args, log, lambda t: print(f"[setup] {t} …", flush=True))
+        listener = assemble(log, lambda t: print(f"[setup] {t} …", flush=True))
     except model.ModelError as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1
     return listener.run()
 
 
-def run_tui(args) -> int:
+def run_interface() -> int:
     import ui
 
     def build(app: "ui.AssistantApp") -> Listener:
-        log = ui.UiLog(
-            app,
-            args.wake_word,
-            path=args.log,
-            verbose=args.verbose,
-            bell=False,
-        )
-        return assemble(args, log, log.setup)
+        log = ui.UiLog(app, persona.WAKE_WORD, bell=False)
+        return assemble(log, log.setup)
 
-    app = ui.AssistantApp(build, wake_word=args.wake_word)
+    app = ui.AssistantApp(build)
     try:
         app.run()
     finally:
@@ -488,14 +277,8 @@ def run_tui(args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-
-    if args.list_devices:
-        print(audio.list_devices())
-        return 0
-
-    return run_plain(args) if args.plain else run_tui(args)
+def main() -> int:
+    return run_interface() if INTERFACE else run_console()
 
 
 if __name__ == "__main__":

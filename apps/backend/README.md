@@ -54,7 +54,8 @@ command line.
 the name *sounds*. It matters more than it looks: on the fuzzy match alone,
 "ollie" is recognised but "olly", "oli" and "oly" are not, and Whisper produces
 all three. A new name works with none listed, so start there and add what
-`--verbose` shows you actually being misheard as. Short names trip over ordinary
+`VERBOSE = True` in `hit_log.py` shows you actually being misheard as. Short
+names trip over ordinary
 speech more easily, so watch for false wakes before settling on one.
 
 ## Layout
@@ -111,11 +112,11 @@ me?" is answered by glancing up rather than by reading timestamps.
 
 Textual owns the main thread, so the listener runs on a thread of its own and
 everything it has to say is posted to the screen as a message. `ui.UiLog` is a
-`HitLog` with the printing swapped out, so the JSONL written by `--log` is
+`HitLog` with the printing swapped out, so the JSONL written to `hit_log.LOG_PATH` is
 identical in either mode. Press `q` to quit.
 
-Use `--plain` for the old scrolling console output — worth it when piping to a
-file or debugging something the interface would paint over.
+Set `INTERFACE = False` in `main.py` for scrolling console output — worth it when
+piping to a file or debugging something the interface would paint over.
 
 ## Thinking
 
@@ -145,7 +146,8 @@ sentences are not mistaken for your turn to speak.
 
 Between your question ending and the answer starting there are two or three
 seconds of silence, which is indistinguishable from not having been heard. So
-she fills it — "let me think", picked at random from `--thinking-reply` — the
+she fills it — "let me think", picked at random from `persona.THINKING_REPLIES` —
+the
 instant the question lands, *before* the large model transcribes it:
 
 ```
@@ -157,7 +159,7 @@ instant the question lands, *before* the large model transcribes it:
 Transcription and generation both run while the filler plays, so it costs no
 added delay — the answer arrives marginally *sooner* than it did with nothing
 there, because the filler no longer sits in series with the model call. Pass
-`--thinking-reply ''` to go straight to the answer.
+`THINKING_REPLIES = ()` to go straight to the answer.
 
 Saying only the wake word does not trigger it. For a one-breath "Ollie, what's
 the weather", the cheap model re-scans the burst first (about 0.1 s) to confirm
@@ -167,10 +169,10 @@ promising to think about nothing.
 Answers are spoken, not read, which shapes two more things. Markdown is stripped
 before synthesis — asterisks and backticks are noise out loud. And Qwen-style
 models reason at length before answering, which is dead air, so thinking is off
-unless you pass `--think`. The system prompt asks for a sentence or two of plain
-prose; override it with `--system`.
+unless `persona.THINK` is on. The prompt asking for a sentence or two of plain
+prose is `persona.SYSTEM`.
 
-The model remembers the last `--history-turns` exchanges, so follow-up questions
+The model remembers the last `persona.HISTORY_TURNS` exchanges, so follow-up questions
 work as long as you wake her again for each one.
 
 ## Talking
@@ -239,62 +241,53 @@ ollama pull qwen3:14b
 ## Usage
 
 ```sh
-.venv/bin/python main.py
-.venv/bin/python main.py --plain                  # scrolling console output
-.venv/bin/python main.py --on-wake 'say yes'      # speak a reply on wake
-.venv/bin/python main.py --verbose                # show every wake scan
-.venv/bin/python main.py --log events.jsonl       # record wakes and questions
-.venv/bin/python main.py --list-devices           # pick a microphone
-.venv/bin/python main.py --no-llm                 # transcribe only, no answer
-.venv/bin/python main.py --llm-model zero:latest  # answer with another model
-.venv/bin/python model.py "why is the sky blue?"  # try the model on its own
+uv run main.py
 ```
 
+That is the whole interface. There are no flags: every choice lives in the file
+that governs it, so there is one place to change each and nothing to keep in step.
+
+| file | holds |
+| --- | --- |
+| `persona.py` | her name, wake word, mishearings, voice, prompt, greeting, spoken fillers, **and the model she thinks with** |
+| `audio.py` | sample rate, the speech gate, silence, utterance bounds, rolling window, microphone |
+| `listener.py` | which Whisper models run, language, how long she waits for a question, wake confidence |
+| `hit_log.py` | JSONL path, verbosity, terminal bell |
+| `main.py` | `INTERFACE` — the full-screen interface, or scrolling console output |
+
+Two worth knowing about on a smaller machine:
+
+```python
+# persona.py
+MODEL = "qwen3:14b"       # ~10 GB resident; qwen3:4b on a 16 GB box
+
+# listener.py
+QUESTION_MODEL = "large"  # seconds per question on CPU; turbo is the trade
 ```
+
+Set `INTERFACE = False` in `main.py` for the console log, which is easier to read
+when something is going wrong:
+
+```
+[setup] voice 'en_US-ryan-medium' …
+[setup] llm 'qwen3:14b' at http://localhost:11434 …
+[setup] modules weather …
+[setup] wake model 'base.en' on mps …
+[setup] question model 'large' on mps …
 [listening] noise floor 0.0010 rms, gate at 0.0040 rms — say 'ollie' (ctrl-c to stop)
 
 [20:00:00] OLLIE #1 (38 ms)
-  ? What is the capital of Portugal?
+  ? what is the weather in Lisbon
   … thinking
-  > The capital of Portugal is Lisbon. (2.0s)
+  · weather.current_conditions (2.0s)
+  > It's 22 degrees and clear in Lisbon. (3.4s)
 ```
 
-The time in brackets is how long the model itself took; add roughly one
-`--window-interval` for the wait before the scan.
+To list microphones:
 
-### Options
-
-| flag | default | meaning |
-| --- | --- | --- |
-| `--wake-word` | `ollie` | word to watch for |
-| `--wake-model` | `base.en` | fast model that spots the wake word |
-| `--model` | `large` | model that transcribes the question |
-| `--device` | `auto` | `cpu`, `cuda`, or `mps`; auto prefers the GPU |
-| `--language` | `en` | `auto` to let Whisper detect it |
-| `--greeting` | `Hi, I'm Ollie, how can I help you?` | spoken once the mic is calibrated (`''` for silence) |
-| `--wake-reply` | `Yes?` | spoken the instant the wake word lands (`''` for silence) |
-| `--thinking-reply` | 3 phrases | spoken the instant a question lands (`''` for silence) |
-| `--voice` | `en_US-ryan-medium` | Piper voice to speak with |
-| `--no-voice` | off | never speak, just print |
-| `--llm-model` | `qwen3:14b` | Ollama model that answers the question |
-| `--llm-host` | `http://localhost:11434` | where Ollama is listening |
-| `--system` | see `persona.py` | system prompt handed to the model |
-| `--think` | off | let the model reason first — slower, silent while it does |
-| `--history-turns` | `6` | past exchanges the model is reminded of |
-| `--no-llm` | off | transcribe the question but do not answer it |
-| `--on-wake` | none | shell command run the instant the wake word lands |
-| `--wake-confidence` | `0.5` | reject hits Whisper scores above this as non-speech |
-| `--question-timeout` | `10.0` | give up waiting for a question after this long |
-| `--window` | `1.5` | seconds of audio each wake scan looks at |
-| `--window-interval` | `0.25` | seconds between wake scans while you speak |
-| `--sensitivity` | `3.0` | gate height, as a multiple of the noise floor |
-| `--silence` | `0.35` | seconds of quiet that end an utterance |
-| `--min-utterance` | `0.25` | ignore shorter blips |
-| `--max-utterance` | `15.0` | force a transcription after this much speech |
-| `--input-device` | default mic | name or index from `--list-devices` |
-| `--log` | off | append wakes and questions to a JSONL file |
-| `--plain` | off | console logging instead of the full screen interface |
-| `--no-bell` | off | stay silent on a hit |
+```sh
+uv run python -c "import audio; print(audio.list_devices())"
+```
 
 ## Tuning
 
@@ -308,11 +301,11 @@ Measured on an M5 Pro with a 2.2 s clip, seconds per transcription:
 | base.en | 0.13 | 0.07 | 0.07 |
 | tiny.en | 0.07 | 0.06 | 0.05 |
 
-- Wake word missed? Try `--wake-model small.en` (still well under real time),
-  or lower `--sensitivity` if the gate is not opening at all.
-- False wakes? Raise `--wake-confidence` toward `0.3`, or raise
-  `--sensitivity`.
-- Questions slow to appear? `--model turbo` is roughly twice as fast as
-  `large` for a small accuracy cost.
+- Wake word missed? Try `WAKE_MODEL = "small.en"` in `listener.py` (still well
+  under real time), or lower `audio.SENSITIVITY` if the gate is not opening at all.
+- False wakes? Raise `listener.WAKE_CONFIDENCE` toward `0.3`, or raise
+  `audio.SENSITIVITY`.
+- Questions slow to appear? `QUESTION_MODEL = "turbo"` in `listener.py` is roughly
+  twice as fast as `large` for a small accuracy cost.
 - On macOS the terminal needs microphone permission
   (System Settings → Privacy & Security → Microphone).
