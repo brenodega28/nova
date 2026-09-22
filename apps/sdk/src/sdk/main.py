@@ -1,7 +1,8 @@
 """The base every module is built on: manifest, arguments, protocol.
 
-A module subclasses :class:`Module`, declares each tool with :func:`tool`, and
-ships a thin ``module.toml`` beside itself. Everything else happens here, once,
+A module is a directory holding a ``main.py`` that subclasses :class:`Module`,
+declares each tool with :func:`tool`, and a thin ``module.toml`` beside it. The
+entry point is always ``main.py``, so nothing has to say where to start. Everything else happens here, once,
 for every module there will ever be — reading the manifest, filling in defaults,
 checking arguments, dispatching, answering in the envelope, and emitting the tool
 definitions a model can be offered.
@@ -39,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 MANIFEST_NAME = "module.toml"
+ENTRY_NAME = "main.py"
 SUPPORTED_MANIFEST = 1
 
 
@@ -65,17 +67,23 @@ class Arg:
         default_from: str | None = None,
         description: str = "",
         required: bool = True,
+        missing: str | None = None,
     ):
         self.default = default
         self.default_from = default_from
         self.description = description
         self.required = required
+        self.missing = missing
 
     def check(self, name: str, value: Any) -> Any:
         return value
 
     def schema(self) -> dict:
         return {"type": self.json_type, "description": self.description}
+
+    def refuse_missing(self, tool_name: str, arg: str) -> str:
+        """What the speaker hears when a required argument was not supplied."""
+        return self.missing or f"{tool_name} needs {arg}"
 
     def optional(self) -> bool:
         return not self.required or self.default is not None or bool(self.default_from)
@@ -250,7 +258,7 @@ class Module:
                 value = self._default_for(spec)
                 if value is None:
                     if not spec.optional():
-                        raise BadRequest(f"{name} needs {arg}")
+                        raise BadRequest(spec.refuse_missing(name, arg))
                     continue
             checked[arg] = spec.check(arg, value)
         return checked
