@@ -9,9 +9,6 @@ with in :mod:`persona`, how the microphone is read in :mod:`audio`, which Whispe
 models run and how long she waits in :mod:`listener`, what gets logged in
 :mod:`hit_log` — so each one has exactly one home.
 
-Set :data:`INTERFACE` to ``False`` for scrolling console output instead of the
-full-screen interface, which is easier to read when something is going wrong.
-
 She also opens a control port while she runs, which :mod:`control` describes and
 ``apps/api`` is the thing that speaks to it. Everything that reads or changes her
 from outside goes through there: the screen and the dashboard are handed the same
@@ -40,7 +37,6 @@ from hit_log import HitLog, Tee
 from listener import Listener
 from supervisor import Supervisor
 
-INTERFACE = True
 CONTROL_PORT = True
 STICKY_SECONDS = 120.0
 
@@ -203,9 +199,8 @@ def lend_tqdm_a_plain_lock() -> None:
 def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     """Load everything and wire it together, reporting progress as it goes.
 
-    Called on the main thread in console mode and from the interface's worker
-    thread otherwise, which is why every word of progress goes through ``log``
-    rather than straight to stdout.
+    Called from the interface's worker thread, which is why every word of
+    progress goes through ``log`` rather than straight to stdout.
 
     The values come from :mod:`settings` rather than from the constants directly.
     That is the same set of numbers either way — a setting nobody has changed is
@@ -285,9 +280,8 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
 def supervised(sinks: list, picture, server) -> Supervisor:
     """Tie the log, the listener and the control port into one running thing.
 
-    The sinks are every place an event has to reach. Which ones there are differs
-    between the screen and the console; that they all see the same events, in the
-    same order, from the one log the listener was handed, does not.
+    The sinks are every place an event has to reach. They all see the same events,
+    in the same order, from the one log the listener was handed.
     """
     log = Tee(sinks, persona.WAKE_WORD)
     supervisor = Supervisor(lambda: assemble(log, log.setup), log)
@@ -316,23 +310,6 @@ def open_control(picture) -> control.ControlServer | None:
     return server
 
 
-def run_console() -> int:
-    picture = state_module.State()
-    server = open_control(picture)
-
-    sinks: list = [HitLog(persona.WAKE_WORD)]
-    sinks.append(state_module.StateLog(picture, persona.WAKE_WORD))
-    if server is not None:
-        sinks.append(control.ControlLog(server, persona.WAKE_WORD))
-
-    supervisor = supervised(sinks, picture, server)
-    try:
-        return supervisor.run()
-    finally:
-        if server is not None:
-            server.stop()
-
-
 def run_interface() -> int:
     import ui
 
@@ -357,7 +334,7 @@ def run_interface() -> int:
 
 
 def main() -> int:
-    return run_interface() if INTERFACE else run_console()
+    return run_interface()
 
 
 if __name__ == "__main__":

@@ -186,10 +186,7 @@ me?" is answered by glancing up rather than by reading timestamps.
 Textual owns the main thread, so the listener runs on a thread of its own and
 everything it has to say is posted to the screen as a message. `ui.UiLog` is a
 `HitLog` with the printing swapped out, so the JSONL written to `hit_log.LOG_PATH` is
-identical in either mode. Press `q` to quit.
-
-Set `INTERFACE = False` in `main.py` for scrolling console output — worth it when
-piping to a file or debugging something the interface would paint over.
+identical to what `HitLog` would write. Press `q` to quit.
 
 ## Thinking
 
@@ -326,7 +323,7 @@ that governs it, so there is one place to change each and nothing to keep in ste
 | `audio.py` | sample rate, the speech gate, silence, utterance bounds, rolling window, microphone |
 | `listener.py` | which Whisper models run, language, how long she waits for a question, wake confidence |
 | `hit_log.py` | JSONL path, verbosity, terminal bell |
-| `main.py` | `INTERFACE` — the full-screen interface, or scrolling console output; `CONTROL_PORT` |
+| `main.py` | `CONTROL_PORT` |
 | `settings.py` | which of those a dashboard may change, and within what bounds |
 
 Two worth knowing about on a smaller machine:
@@ -337,24 +334,6 @@ MODEL = "qwen3:14b"       # ~10 GB resident; qwen3:4b on a 16 GB box
 
 # listener.py
 QUESTION_MODEL = "large"  # seconds per question on CPU; turbo is the trade
-```
-
-Set `INTERFACE = False` in `main.py` for the console log, which is easier to read
-when something is going wrong:
-
-```
-[setup] voice 'en_US-ryan-medium' …
-[setup] llm 'qwen3:14b' at http://localhost:11434 …
-[setup] modules weather …
-[setup] wake model 'base.en' on mps …
-[setup] question model 'large' on mps …
-[listening] noise floor 0.0010 rms, gate at 0.0040 rms — say 'ollie' (ctrl-c to stop)
-
-[20:00:00] OLLIE #1 (38 ms)
-  ? what is the weather in Lisbon
-  … thinking
-  · weather.current_conditions (2.0s)
-  > It's 22 degrees and clear in Lisbon. (3.4s)
 ```
 
 To list microphones:
