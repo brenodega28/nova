@@ -43,7 +43,7 @@ from typing import Protocol
 
 from sdk import ENTRY_NAME, MANIFEST_NAME, SUPPORTED_MANIFEST
 
-MODULES_DIR = Path(__file__).resolve().parents[2] / "modules"
+MODULES_DIR = Path.home() / ".nova" / "apps"
 MAX_OUTPUT = 256 * 1024
 MAX_SPEECH = 1000
 MAX_DETAIL = 400

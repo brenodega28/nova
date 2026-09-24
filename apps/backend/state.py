@@ -91,6 +91,14 @@ class StateLog(HitLog):
         super().__init__(wake_word, **kwargs)
         self.state = state
 
+    def starting(self) -> None:
+        """Forget the last listener's loading story before telling a new one."""
+        with self.state._lock:
+            self.state.activity = LOADING
+            self.state.setup = []
+            self.state.speaking_text = ""
+            self.state._note("system", "starting")
+
     def setup(self, text: str) -> None:
         with self.state._lock:
             self.state.setup.append(text)

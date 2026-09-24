@@ -334,6 +334,9 @@ class UiLog(HitLog):
         except Exception:
             pass
 
+    def starting(self) -> None:
+        self._post(self.app.set_state, LOADING)
+
     def setup(self, text: str) -> None:
         self._post(self.app.add_setup, text)
 
@@ -375,3 +378,7 @@ class UiLog(HitLog):
 
     def summary(self) -> None:
         self._post(self.app.add_system, f"heard '{self.wake_word}' {self.hits} time(s)")
+
+    def broken(self, message: str) -> None:
+        self._post(self.app.add_error, message)
+        self._post(self.app.set_state, BROKEN)

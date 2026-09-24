@@ -87,6 +87,7 @@ class Supervisor:
             self._restarting.clear()
             self._running.clear()
 
+            self.log.starting()
             try:
                 self.listener = self.build()
             except Exception as exc:

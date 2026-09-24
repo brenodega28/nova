@@ -62,19 +62,92 @@ speech more easily, so watch for false wakes before settling on one.
 
 | file | holds |
 | --- | --- |
-| `main.py` | the CLI — flags, device choice, model loading, entry point |
+| `main.py` | device choice, model loading, entry point |
 | `audio.py` | microphone capture, the voice activity gate, rolling partials |
-| `hit_log.py` | console output and the optional JSONL log |
+| `hit_log.py` | console output, the optional JSONL log, and `Tee` |
 | `persona.py` | her character — name, prompt, voice, and everything she says unprompted |
 | `listener.py` | wake-word matching and the wake → question state machine |
 | `ui.py` | the Textual screen — the face, the conversation, the log that feeds them |
 | `model.py` | the local LLM — Ollama over HTTP, answers streamed by sentence |
 | `talk.py` | speech out — Piper neural TTS played to the speakers |
+| `broker.py` | finding installed modules, and calling them in their own process |
+| `settings.py` | what a dashboard may change, and the SQLite it is kept in |
+| `state.py` | the current picture, as plain data something else can read |
+| `control.py` | the control port — commands in, events out |
+| `supervisor.py` | running the listener, and building it again when asked |
 
 The interface holds the main thread, capture runs on a thread of its own, wake
 scanning on a second, and the large model on a third. The wake scanner keeps
 only the newest window, so a slow pass never leaves it chewing through stale
 audio.
+
+## The control port
+
+She opens `127.0.0.1:8765` while she runs. Newline-delimited JSON, both
+directions: commands in, events out. `apps/api` is what speaks to it, and
+`apps/mobile` is what that serves — nothing here knows either exists.
+
+```sh
+uv run python -c "
+import json, socket
+s = socket.create_connection(('127.0.0.1', 8765)); f = s.makefile('rwb')
+print(json.loads(f.readline())['data']['state']['activity'])
+f.write(b'{\"id\": 1, \"command\": \"restart\"}\n'); f.flush()
+print(json.loads(f.readline()))
+"
+```
+
+A client is sent `hello` with the whole current picture the moment it connects,
+before any event, so nothing has to reconstruct the present from a stream that
+started in the middle.
+
+| command | does |
+| --- | --- |
+| `hello` | the whole picture: state, settings, modules, who she is |
+| `state` | what she is doing, and the conversation so far |
+| `settings` | every setting, its value, its default, and a JSON Schema |
+| `set` | change settings — `{"changes": {...}, "apply": true}` |
+| `reset` | forget overrides — `{"names": [...]}`, or all of them |
+| `modules` | what is installed, what it wants reached, what it can do |
+| `restart` | rebuild the listener, applying settings |
+| `reload` | replace the process image |
+| `ping` | still there |
+
+It is loopback-only and stays that way. What is on this port can change which
+model she thinks with and restart her at will, so it is not a thing to put on a
+network — `apps/api` is what faces the network, and authenticating it is its job.
+Set `NOVA_CONTROL_TOKEN` to want a token here too.
+
+Events carry the same things the screen draws, from the same log, so the two
+cannot disagree: `starting` `setup` `ready` `wake` `question` `thinking`
+`answer_chunk` `answer` `module` `timeout` `error` `broken` `summary` `settings`.
+
+## Settings
+
+The constants below are still the defaults, and still the one place each is
+written down. `settings.py` adds a curated list of which of them a dashboard may
+change and what it may change them to, and a SQLite file holding **only the
+differences** — a value nobody has touched is not stored at all.
+
+```sh
+uv run python -c "import settings; print(settings.load().voice)"
+uv run python -c "import settings; settings.store().clear()"   # forget every override
+```
+
+Most changes only take effect when the listener is rebuilt: a Whisper model
+already resident on the GPU does not change because a row changed. `set` says
+which of the settings it just changed need that, and `restart` is what does it —
+about as long as a cold start, minus the interpreter.
+
+A `restart` rebuilds the listener inside the same process. A `reload` replaces
+the process image, which is what a new version of the code wants. Neither is
+something the API can do to her from outside: it is a separate instance with a
+separate lifetime, so it can only ask.
+
+If setup fails — Ollama down, a voice that will not download — she stays up with
+the port open and reports `broken` rather than exiting, because that is the
+moment a dashboard most needs to be able to ask what went wrong. A `restart`
+tries again.
 
 ## The screen
 
@@ -253,7 +326,8 @@ that governs it, so there is one place to change each and nothing to keep in ste
 | `audio.py` | sample rate, the speech gate, silence, utterance bounds, rolling window, microphone |
 | `listener.py` | which Whisper models run, language, how long she waits for a question, wake confidence |
 | `hit_log.py` | JSONL path, verbosity, terminal bell |
-| `main.py` | `INTERFACE` — the full-screen interface, or scrolling console output |
+| `main.py` | `INTERFACE` — the full-screen interface, or scrolling console output; `CONTROL_PORT` |
+| `settings.py` | which of those a dashboard may change, and within what bounds |
 
 Two worth knowing about on a smaller machine:
 

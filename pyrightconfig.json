@@ -1,8 +1,18 @@
 {
   "venvPath": "apps/backend",
   "venv": ".venv",
-  "extraPaths": ["apps/sdk/src"],
+  "extraPaths": [
+    "apps/sdk/src",
+    "apps/api/src",
+    "apps/api/.venv/lib/python3.14/site-packages"
+  ],
   "typeCheckingMode": "standard",
-  "include": ["apps", "modules"],
-  "exclude": ["**/.venv", "**/__pycache__"]
+  "include": [
+    "apps",
+    "modules"
+  ],
+  "exclude": [
+    "**/.venv",
+    "**/__pycache__"
+  ]
 }

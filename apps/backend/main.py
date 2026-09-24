@@ -11,6 +11,11 @@ models run and how long she waits in :mod:`listener`, what gets logged in
 
 Set :data:`INTERFACE` to ``False`` for scrolling console output instead of the
 full-screen interface, which is easier to read when something is going wrong.
+
+She also opens a control port while she runs, which :mod:`control` describes and
+``apps/api`` is the thing that speaks to it. Everything that reads or changes her
+from outside goes through there: the screen and the dashboard are handed the same
+events by the same log, so neither is the authoritative one.
 """
 
 from __future__ import annotations
@@ -26,12 +31,17 @@ from collections.abc import Callable
 
 import audio
 import broker
+import control
 import model
 import persona
-from hit_log import HitLog
-from listener import QUESTION_MODEL, WAKE_MODEL, Listener
+import settings as settings_module
+import state as state_module
+from hit_log import HitLog, Tee
+from listener import Listener
+from supervisor import Supervisor
 
 INTERFACE = True
+CONTROL_PORT = True
 STICKY_SECONDS = 120.0
 
 
@@ -196,31 +206,43 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     Called on the main thread in console mode and from the interface's worker
     thread otherwise, which is why every word of progress goes through ``log``
     rather than straight to stdout.
+
+    The values come from :mod:`settings` rather than from the constants directly.
+    That is the same set of numbers either way — a setting nobody has changed is
+    the constant — but read through the one place a dashboard is allowed to
+    change them, so that what she is built with here and what the dashboard
+    reports are never two different answers.
     """
+    chosen = settings_module.load()
     device = resolve_device()
     if device == "mps":
         os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
     import talk
 
-    talker = talk.configure(voice=persona.VOICE)
-    progress(f"voice '{persona.VOICE}'")
+    talker = talk.configure(voice=chosen.voice)
+    progress(f"voice '{chosen.voice}'")
     talker.load()
 
     greeting = None
-    if persona.GREETING:
-        greeting = lambda: talker.say(persona.GREETING, blocking=False)
+    if chosen.greeting:
+        greeting = lambda: talker.say(chosen.greeting, blocking=False)
     speak = None
-    if persona.WAKE_REPLY:
-        speak = lambda: talker.say(persona.WAKE_REPLY, blocking=False)
+    if chosen.wake_reply:
+        speak = lambda: talker.say(chosen.wake_reply, blocking=False)
     acknowledge = None
     if persona.THINKING_REPLIES:
         acknowledge = lambda: talker.say(
             random.choice(persona.THINKING_REPLIES), blocking=False
         )
 
-    brain = model.Model()
-    progress(f"llm '{persona.MODEL}' at {persona.HOST}")
+    brain = model.Model(
+        name=chosen.llm_model,
+        host=chosen.llm_host,
+        think=chosen.think,
+        history_turns=chosen.history_turns,
+    )
+    progress(f"llm '{chosen.llm_model}' at {chosen.llm_host}")
     brain.load()
 
     registry = broker.Registry()
@@ -233,17 +255,25 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     lend_tqdm_a_plain_lock()
     import whisper
 
-    progress(f"wake model '{WAKE_MODEL}' on {device}")
-    wake_model = whisper.load_model(WAKE_MODEL, device=device)
-    progress(f"question model '{QUESTION_MODEL}' on {device}")
-    question_model = whisper.load_model(QUESTION_MODEL, device=device)
+    progress(f"wake model '{chosen.wake_model}' on {device}")
+    wake_model = whisper.load_model(chosen.wake_model, device=device)
+    progress(f"question model '{chosen.question_model}' on {device}")
+    question_model = whisper.load_model(chosen.question_model, device=device)
 
     return Listener(
         wake_model,
         question_model,
-        capture=audio.AudioCapture(),
+        capture=audio.AudioCapture(
+            sensitivity=chosen.sensitivity,
+            silence=chosen.silence_seconds,
+            max_utterance=chosen.max_utterance,
+            input_device=chosen.input_device or None,
+        ),
         log=log,
+        language=chosen.language if chosen.language != "auto" else None,
         fp16=device in ("cuda", "mps"),
+        question_timeout=chosen.question_timeout,
+        max_no_speech=chosen.wake_confidence,
         wake_reply=speak,
         muted_until=talker.muted_until,
         on_question=answer_aloud(brain, talker, log, registry, runner),
@@ -252,28 +282,77 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     )
 
 
-def run_console() -> int:
-    log = HitLog(persona.WAKE_WORD)
+def supervised(sinks: list, picture, server) -> Supervisor:
+    """Tie the log, the listener and the control port into one running thing.
+
+    The sinks are every place an event has to reach. Which ones there are differs
+    between the screen and the console; that they all see the same events, in the
+    same order, from the one log the listener was handed, does not.
+    """
+    log = Tee(sinks, persona.WAKE_WORD)
+    supervisor = Supervisor(lambda: assemble(log, log.setup), log)
+    if server is not None:
+        server.supervisor = supervisor
+    return supervisor
+
+
+def open_control(picture) -> control.ControlServer | None:
+    """Open the control port, or carry on without one if it will not open.
+
+    A port already in use means another backend is running, and that is worth
+    saying plainly — but it is not worth refusing to listen over. She works
+    perfectly well with nothing attached; the dashboard is the part that does
+    not work, and the message says so.
+    """
+    if not CONTROL_PORT:
+        return None
+    server = control.ControlServer(picture)
     try:
-        listener = assemble(log, lambda t: print(f"[setup] {t} …", flush=True))
-    except model.ModelError as exc:
-        print(f"[error] {exc}", file=sys.stderr)
-        return 1
-    return listener.run()
+        server.start()
+    except OSError as exc:
+        print(f"[error] control port {control.PORT} unavailable: {exc}", file=sys.stderr)
+        return None
+    print(f"[setup] control port {control.HOST}:{control.PORT} …", flush=True)
+    return server
+
+
+def run_console() -> int:
+    picture = state_module.State()
+    server = open_control(picture)
+
+    sinks: list = [HitLog(persona.WAKE_WORD)]
+    sinks.append(state_module.StateLog(picture, persona.WAKE_WORD))
+    if server is not None:
+        sinks.append(control.ControlLog(server, persona.WAKE_WORD))
+
+    supervisor = supervised(sinks, picture, server)
+    try:
+        return supervisor.run()
+    finally:
+        if server is not None:
+            server.stop()
 
 
 def run_interface() -> int:
     import ui
 
-    def build(app: "ui.AssistantApp") -> Listener:
-        log = ui.UiLog(app, persona.WAKE_WORD, bell=False)
-        return assemble(log, log.setup)
+    picture = state_module.State()
+    server = open_control(picture)
+
+    def build(app: "ui.AssistantApp") -> Supervisor:
+        sinks: list = [ui.UiLog(app, persona.WAKE_WORD, bell=False)]
+        sinks.append(state_module.StateLog(picture, persona.WAKE_WORD))
+        if server is not None:
+            sinks.append(control.ControlLog(server, persona.WAKE_WORD))
+        return supervised(sinks, picture, server)
 
     app = ui.AssistantApp(build)
     try:
         app.run()
     finally:
         app.shutdown_listener()
+        if server is not None:
+            server.stop()
     return 0
 
 

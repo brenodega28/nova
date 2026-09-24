@@ -165,7 +165,7 @@ class ControlServer:
             "generation": self.supervisor.generation if self.supervisor else 0,
         }
 
-    def modules(self) -> list[dict]:
+    def modules(self) -> dict:
         """What is installed, what it wants, and what it can do.
 
         Reading the manifests runs nothing, so this is safe to answer on demand.
@@ -320,6 +320,7 @@ def _handler_for(server: "ControlServer"):
 
         def handle(self) -> None:
             client = Client(self.request, self.client_address)
+            self.request.settimeout(WRITE_TIMEOUT)
             server.attach(client)
             writer = threading.Thread(target=self._write, args=(client,), daemon=True)
             writer.start()
@@ -333,10 +334,19 @@ def _handler_for(server: "ControlServer"):
                 server.detach(client)
 
         def _read(self, client: Client) -> None:
+            """Read commands until the peer goes away.
+
+            The socket carries a timeout so a stalled write cannot wedge the
+            writer thread forever, and a timeout is per-socket rather than per
+            call — so a quiet connection lands here, where it means nothing was
+            said recently and emphatically not that the client has gone.
+            """
             buffered = b""
             while client.alive:
                 try:
                     chunk = self.request.recv(4096)
+                except TimeoutError:
+                    continue
                 except OSError:
                     break
                 if not chunk:
@@ -371,12 +381,18 @@ def _handler_for(server: "ControlServer"):
             client.send(reply)
 
         def _write(self, client: Client) -> None:
-            self.request.settimeout(WRITE_TIMEOUT)
+            """Push queued events, dropping a client that has stopped reading.
+
+            A peer that never drains its receive window would otherwise block
+            ``sendall`` for as long as the connection survives. Timing out and
+            hanging up is the right answer: the queue is already bounded, and a
+            client this far behind has nothing to gain from the backlog.
+            """
             while client.alive:
                 for line in client.drain():
                     try:
                         self.request.sendall(line.encode("utf-8") + b"\n")
-                    except OSError:
+                    except (OSError, TimeoutError):
                         client.close()
                         return
 
@@ -393,6 +409,9 @@ class ControlLog(HitLog):
     def __init__(self, server: ControlServer, wake_word: str, **kwargs):
         super().__init__(wake_word, **kwargs)
         self.server = server
+
+    def starting(self) -> None:
+        self.server.publish("starting", {})
 
     def setup(self, text: str) -> None:
         self.server.publish("setup", {"text": text})

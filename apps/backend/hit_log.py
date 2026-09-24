@@ -45,6 +45,18 @@ class HitLog:
     def _clock(utterance: Utterance) -> str:
         return datetime.fromtimestamp(utterance.started_at).strftime("%H:%M:%S")
 
+    def starting(self) -> None:
+        """A listener is being built. Anything shown about the last one is stale."""
+        print("[setup] starting …", flush=True)
+
+    def setup(self, text: str) -> None:
+        """One step of loading finished. The interface shows these too."""
+        print(f"[setup] {text} …", flush=True)
+
+    def broken(self, message: str) -> None:
+        """Setup failed outright, so nothing is listening."""
+        self.error(message)
+
     def ready(self, floor: float, threshold: float) -> None:
         print(
             f"[listening] noise floor {floor:.4f} rms, "
@@ -160,6 +172,9 @@ class Tee(HitLog):
                 method(*args, **kwargs)
             except Exception:
                 continue
+
+    def starting(self) -> None:
+        self._fan("starting")
 
     def setup(self, text: str) -> None:
         self._fan("setup", text)
