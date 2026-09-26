@@ -40,8 +40,11 @@ from collections.abc import Callable
 from typing import Any
 
 import broker
+import languages
 import persona
 import settings as settings_module
+import switch
+import talk
 from audio import Utterance
 from hit_log import HitLog
 
@@ -281,6 +284,54 @@ class ControlServer:
             "restart_required": needs_restart,
             "restarting": applied,
         }
+
+    def _do_voices(self, args: dict) -> dict:
+        language = args.get("language")
+        if not isinstance(language, str) or not language.strip():
+            raise Refused("voices needs a 'language', like 'en' or 'pt_BR'")
+        language = language.strip()
+        return {"language": language, "voices": talk.available_voices(language)}
+
+    def _do_set_voice(self, args: dict) -> dict:
+        voice = args.get("voice")
+        if not isinstance(voice, str) or not voice.strip():
+            raise Refused("set_voice needs a 'voice', like 'en_US-amy-medium'")
+        voice = voice.strip()
+        if voice not in talk.catalog():
+            raise Refused(f"no voice named {voice!r} — see voices")
+        self._switch_in_background("voice", switch.voice, voice)
+        return {"switching": True, "voice": voice}
+
+    def _do_set_language(self, args: dict) -> dict:
+        code = args.get("language")
+        if not isinstance(code, str) or not code.strip():
+            raise Refused("set_language needs a 'language', like 'pt' or 'en'")
+        code = code.strip().lower()
+        try:
+            languages.name_of(code)
+        except ValueError as exc:
+            raise Refused(str(exc)) from exc
+        self._switch_in_background("language", switch.language, code)
+        return {"switching": True, "language": code}
+
+    def _switch_in_background(
+        self, what: str, action: Callable[[str], Any], value: str
+    ) -> None:
+        def run() -> None:
+            try:
+                action(value)
+            except Exception as exc:
+                self.publish(
+                    "error",
+                    {"message": f"could not switch {what} to {value!r}: "
+                     f"{type(exc).__name__}: {exc}"},
+                )
+                return
+            self.publish("settings", settings_module.describe())
+            if self.supervisor is not None:
+                self.supervisor.restart()
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _do_reset(self, args: dict) -> dict:
         names = args.get("names")

@@ -29,6 +29,7 @@ import signal
 import threading
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future
 
 import persona
 from audio import AudioCapture, Utterance
@@ -40,6 +41,7 @@ LANGUAGE = "en"
 
 QUESTION_TIMEOUT = 10.0
 REARM_AFTER = 1.5
+ACKNOWLEDGE_DELAY = 0.5
 WAKE_CONFIDENCE = 0.5
 
 IDLE = "idle"
@@ -128,15 +130,17 @@ class Listener:
     def __init__(
         self,
         wake_model,
-        question_model,
+        question_model: Future,
         capture: AudioCapture,
         log: HitLog,
         wake_word: str = persona.WAKE_WORD,
         wake_variants: Sequence[str] = persona.MISHEARINGS,
         language: str | None = LANGUAGE,
         fp16: bool = False,
+        gpu_lock: threading.Lock | None = None,
         question_timeout: float = QUESTION_TIMEOUT,
         rearm_after: float = REARM_AFTER,
+        acknowledge_delay: float = ACKNOWLEDGE_DELAY,
         max_no_speech: float = WAKE_CONFIDENCE,
         wake_reply: Callable[[], None] | None = None,
         muted_until: Callable[[], float] | None = None,
@@ -151,8 +155,10 @@ class Listener:
         self.matcher = WakeWordMatcher(wake_word, wake_variants)
         self.language = language
         self.fp16 = fp16
+        self.gpu_lock = gpu_lock or threading.Lock()
         self.question_timeout = question_timeout
         self.rearm_after = rearm_after
+        self.acknowledge_delay = acknowledge_delay
         self.max_no_speech = max_no_speech
         self.wake_reply = wake_reply
         self.muted_until = muted_until or (lambda: 0.0)
@@ -161,7 +167,7 @@ class Listener:
         self.greeting = greeting
 
         self.partials = LatestSlot()
-        self.utterances: queue.Queue[Utterance | None] = queue.Queue()
+        self.utterances: queue.Queue[Utterance | str | None] = queue.Queue()
         self.stop_event = threading.Event()
 
         self._lock = threading.Lock()
@@ -171,15 +177,16 @@ class Listener:
         self._last_wake_at = 0.0
 
     def _run(self, model, utterance: Utterance) -> dict:
-        return model.transcribe(
-            utterance.audio,
-            language=self.language,
-            task="transcribe",
-            fp16=self.fp16,
-            temperature=0.0,
-            condition_on_previous_text=False,
-            initial_prompt=f"{self.matcher.wake_word.capitalize()}.",
-        )
+        with self.gpu_lock:
+            return model.transcribe(
+                utterance.audio,
+                language=self.language,
+                task="transcribe",
+                fp16=self.fp16,
+                temperature=0.0,
+                condition_on_previous_text=False,
+                initial_prompt=f"{self.matcher.wake_word.capitalize()}.",
+            )
 
     def _transcribe(self, model, utterance: Utterance) -> str:
         return self._run(model, utterance)["text"].strip()
@@ -292,10 +299,16 @@ class Listener:
                 continue
             if utterance is None:
                 return
+            if isinstance(utterance, str):
+                self._answer(None, utterance)
+                continue
             try:
                 self._consider(utterance)
             except Exception as exc:
                 self.log.error(f"transcription failed: {exc}")
+
+    def ask(self, text: str) -> None:
+        self.utterances.put(text)
 
     def _expire(self) -> None:
         with self._lock:
@@ -319,15 +332,21 @@ class Listener:
         if is_wake_burst and not self._spoken_past_wake_word(utterance):
             return
 
-        self._acknowledge()
+        acknowledgement = threading.Timer(self.acknowledge_delay, self._acknowledge)
+        acknowledgement.daemon = True
+        acknowledgement.start()
 
-        text = self._transcribe(self.question_model, utterance)
+        text = self._transcribe(self.question_model.result(), utterance)
         if not text:
+            acknowledgement.cancel()
             return
 
         if is_wake_burst:
             text = self.matcher.trailing(text) or text
 
+        self._answer(utterance, text)
+
+    def _answer(self, utterance: Utterance | None, text: str) -> None:
         with self._lock:
             self._state = IDLE
         self.log.question(utterance, text)

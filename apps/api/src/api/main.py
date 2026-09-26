@@ -68,6 +68,14 @@ class Reset(BaseModel):
     names: list[str] | None = None
 
 
+class Voice(BaseModel):
+    voice: str = Field(min_length=1)
+
+
+class Language(BaseModel):
+    language: str = Field(min_length=2)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     await backend.start()
@@ -139,6 +147,21 @@ async def change_settings(body: Changes) -> dict:
 @app.post("/settings/reset", dependencies=[Depends(bearer)])
 async def reset_settings(body: Reset) -> dict:
     return await ask("reset", {"names": body.names})
+
+
+@app.get("/voices", dependencies=[Depends(bearer)])
+async def voices(language: str = Query(min_length=2)) -> dict:
+    return await ask("voices", {"language": language})
+
+
+@app.put("/voice", status_code=202, dependencies=[Depends(bearer)])
+async def set_voice(body: Voice) -> dict:
+    return await ask("set_voice", {"voice": body.voice})
+
+
+@app.put("/language", status_code=202, dependencies=[Depends(bearer)])
+async def set_language(body: Language) -> dict:
+    return await ask("set_language", {"language": body.language})
 
 
 @app.get("/modules", dependencies=[Depends(bearer)])

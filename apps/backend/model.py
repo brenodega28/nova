@@ -40,6 +40,10 @@ CHOOSING = (
     "from the conversation, do not call the tool; ask for it in one short "
     "sentence instead."
 )
+TRANSLATING = (
+    "Translate the user's message into {language}. Reply with the translation "
+    "only, as plain text, keeping its tone and length."
+)
 SENTENCE_END = re.compile(r"[.!?…]['\"”’)\]]*(?=\s)|\n")
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.S)
 CODE_FENCE = re.compile(r"```.*?```", re.S)
@@ -223,6 +227,21 @@ class Model:
     def answer(self, question: str) -> str:
         """Answer ``question`` and return the whole thing."""
         return " ".join(self.stream(question))
+
+    def translate(self, text: str, language: str) -> str:
+        messages = [
+            {"role": "system", "content": TRANSLATING.format(language=language)},
+            {"role": "user", "content": text},
+        ]
+        payload = self._payload(messages, stream=False)
+        if self.supports_thinking():
+            payload["think"] = False
+
+        with self._post("/api/chat", payload) as response:
+            answered = json.load(response)
+        if answered.get("error"):
+            raise ModelError(str(answered["error"]))
+        return speakable((answered.get("message") or {}).get("content") or "")
 
     def decide(self, question: str, tools: list[dict]) -> Decision:
         """Offer the model a module's tools and see what it wants to do.

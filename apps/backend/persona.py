@@ -9,7 +9,6 @@
     persona.VOICE             # the Piper voice she speaks with
     persona.SYSTEM            # the prompt that shapes her answers
     persona.GREETING          # how she introduces herself once the mic is live
-    persona.WAKE_REPLY        # what she says the instant she hears her name
     persona.THINKING_REPLIES  # what she says while the model is working
 
 Nothing else in the project spells out her name, her prompt, her voice, the model
@@ -52,5 +51,5 @@ SYSTEM = (
 )
 
 GREETING = f"Hi, I'm {NAME}, how can I help you?"
-WAKE_REPLY = "Yes?"
 THINKING_REPLIES = ("Let me think.", "Hmm, let me think.", "One moment.")
+REPLY_LANGUAGE = "Always reply in {language}, whatever language the question is in."

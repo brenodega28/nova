@@ -20,11 +20,13 @@ covering for without colliding with the answer that follows.
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.request import urlopen
 
 import numpy as np
 import sounddevice as sd
@@ -36,6 +38,43 @@ DEFAULT_DIR = Path(os.path.expanduser("~/.cache/piper"))
 SETTLE_SECONDS = 0.3
 SLICE_SECONDS = 0.05
 SHUTDOWN_SECONDS = 2.0
+CHIME_RATE = 22050
+CHIME_TONES = (880.0, 1320.0)
+CHIME_TONE_SECONDS = 0.06
+CHIME_VOLUME = 0.25
+
+
+def chime_samples() -> np.ndarray:
+    t = np.arange(int(CHIME_RATE * CHIME_TONE_SECONDS)) / CHIME_RATE
+    envelope = np.sin(np.pi * t / CHIME_TONE_SECONDS)
+    tones = [np.sin(2 * np.pi * pitch * t) * envelope for pitch in CHIME_TONES]
+    return (np.concatenate(tones) * CHIME_VOLUME).astype(np.float32)
+
+
+def catalog() -> dict:
+    from piper.download_voices import VOICES_JSON
+
+    with urlopen(VOICES_JSON) as response:
+        return json.load(response)
+
+
+def available_voices(language: str) -> list[str]:
+    wanted = language.lower()
+    return sorted(voice for voice in catalog() if speaks(voice, wanted))
+
+
+def fetch_voice(voice: str, download_dir: Path = DEFAULT_DIR) -> None:
+    from piper.download_voices import download_voice
+
+    if voice not in catalog():
+        raise ValueError(f"no voice named '{voice}' — see /list-voices")
+    download_dir.mkdir(parents=True, exist_ok=True)
+    download_voice(voice, download_dir)
+
+
+def speaks(voice: str, language: str) -> bool:
+    locale = voice.split("-")[0].lower()
+    return language in (locale, locale.split("_")[0])
 
 
 class Talker:
@@ -99,6 +138,9 @@ class Talker:
     def stop(self) -> None:
         """Cut off whatever is playing."""
         self._interrupt.set()
+
+    def chime(self) -> None:
+        sd.play(chime_samples(), CHIME_RATE, device=self.output_device)
 
     def say(self, text: str, blocking: bool = True) -> None:
         text = text.strip()

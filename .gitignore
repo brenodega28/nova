@@ -27,3 +27,4 @@ yarn-error.*
 /apps/mobile/ios/
 /apps/mobile/android/
 nova.db
+docs/

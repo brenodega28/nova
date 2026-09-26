@@ -65,6 +65,13 @@ class Supervisor:
         self._reloading.set()
         self.restart()
 
+    def ask(self, text: str) -> bool:
+        listener = self.listener
+        if listener is None:
+            return False
+        listener.ask(text)
+        return True
+
     def wait_until_running(self, timeout: float = 120.0) -> bool:
         return self._running.wait(timeout)
 

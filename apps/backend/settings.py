@@ -81,10 +81,10 @@ class Settings(BaseSettings):
         "Spoken once the microphone is calibrated. Empty for silence.",
         "Voice",
     )
-    wake_reply: str = _control(
-        persona.WAKE_REPLY,
-        "Wake reply",
-        "Spoken the instant the wake word lands. Empty for silence.",
+    thinking_replies: list[str] = _control(
+        list(persona.THINKING_REPLIES),
+        "Thinking replies",
+        "Said while the model is working. Empty for silence.",
         "Voice",
     )
 

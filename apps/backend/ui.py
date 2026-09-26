@@ -25,6 +25,8 @@ from collections.abc import Callable
 from typing import Protocol
 
 import persona
+import switch
+import talk
 from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Center, VerticalScroll
@@ -32,7 +34,7 @@ from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive
 from textual.theme import Theme
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Input, Static
 
 from hit_log import HitLog
 
@@ -46,6 +48,12 @@ class Listening(Protocol):
     stop_event: threading.Event
 
     def run(self) -> int: ...
+
+    def ask(self, text: str) -> bool: ...
+
+    def restart(self) -> None: ...
+
+    def reload(self) -> None: ...
 
 
 LOADING = "loading"
@@ -159,6 +167,7 @@ class AssistantApp(App):
     #head { height: auto; padding: 1 0 0 0; }
     Face { width: auto; height: auto; color: $accent; }
     Chat { height: 1fr; padding: 1 2 0 2; }
+    #prompt { dock: bottom; margin: 0 2 1 2; }
     .bubble { height: auto; margin: 0 0 1 0; }
     .you { color: $text; }
     .reply { color: $success; }
@@ -191,6 +200,7 @@ class AssistantApp(App):
         with Center(id="head"):
             yield Face(id="face")
         yield Chat(id="chat")
+        yield Input(placeholder="ask something, or /restart /reload /list-voices <lang> /set-voice <voice> /set-language <code> /quit", id="prompt")
         yield Footer()
 
     @property
@@ -257,6 +267,90 @@ class AssistantApp(App):
         except Exception as exc:
             self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
             self.post_message(Draw(self.set_state, (BROKEN,)))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        event.input.clear()
+        if not text:
+            return
+        if text.startswith("/"):
+            name, _, argument = text[1:].partition(" ")
+            self._run_command(name.lower(), argument.strip())
+        elif self.listener is None or not self.listener.ask(text):
+            self.add_error("not listening yet — try again once she is up")
+
+    def _run_command(self, name: str, argument: str) -> None:
+        if name == "quit":
+            self.action_shutdown()
+        elif name == "list-voices" and not argument:
+            self.add_error("which language? e.g. /list-voices en or /list-voices pt_BR")
+        elif name == "list-voices":
+            self.add_system(f"fetching {argument} voices")
+            threading.Thread(
+                target=self._list_voices, args=(argument,), daemon=True
+            ).start()
+        elif self.listener is None:
+            self.add_error("not listening yet — try again once she is up")
+        elif name == "restart":
+            self.add_system("restarting")
+            self.listener.restart()
+        elif name == "reload":
+            self.add_system("reloading")
+            self.listener.reload()
+        elif name == "set-language" and not argument:
+            self.add_error("which language? e.g. /set-language pt or /set-language en")
+        elif name == "set-language":
+            self.add_system(f"switching to '{argument}'")
+            threading.Thread(
+                target=self._set_language, args=(argument.lower(),), daemon=True
+            ).start()
+        elif name == "set-voice" and not argument:
+            self.add_error("which voice? e.g. /set-voice en_US-amy-medium")
+        elif name == "set-voice":
+            self.add_system(f"downloading voice '{argument}'")
+            threading.Thread(
+                target=self._set_voice, args=(argument,), daemon=True
+            ).start()
+        else:
+            self.add_error(f"unknown command /{name} — try /restart, /reload, /list-voices, /set-voice, /set-language or /quit")
+
+    def _list_voices(self, language: str) -> None:
+        try:
+            voices = talk.available_voices(language)
+        except Exception as exc:
+            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            return
+        if not voices:
+            self.post_message(Draw(self.add_error, (f"no voices for '{language}'",)))
+            return
+        summary = f"{len(voices)} {language} voices"
+        self.post_message(Draw(self.add_system, ("\n  ".join([summary, *voices]),)))
+
+    def _set_voice(self, voice: str) -> None:
+        try:
+            switch.voice(voice)
+        except Exception as exc:
+            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            return
+        self.post_message(Draw(self.add_system, (f"voice set to '{voice}' — restarting",)))
+        self.listener.restart()
+
+    def _set_language(self, code: str) -> None:
+        try:
+            changes = switch.language(code)
+        except Exception as exc:
+            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            return
+        self.post_message(
+            Draw(
+                self.add_system,
+                (
+                    f"language set to '{code}', voice '{changes['voice']}', "
+                    f"wake model '{changes['wake_model']}' — restarting",
+                ),
+            )
+        )
+        self.listener.restart()
 
     def action_shutdown(self) -> None:
         self.request_stop()

@@ -13,7 +13,7 @@ accuracy matters and a little latency does not.
 ollie: "Hi, I'm Ollie, how can I help you?"  once the mic is calibrated
 you:   "Ollie."
       └ flagged ~0.2s later
-ollie: "Yes?"                    spoken by Piper, ~0.2s to first sound
+ollie: *chime*                  mic stays open, so you can ask right away
 you:   "What is the weather in Lisbon today?"
 ollie: "Let me think."           immediately, before transcription starts
       └ transcribed by large while that plays, printed and logged
@@ -40,7 +40,6 @@ MISHEARINGS = ("olly", "oli", "oly", "olli", "ollee", "ollie's")
 VOICE = "en_US-ryan-medium"
 SYSTEM = "You are Ollie, a voice assistant. Every reply you give is spoken…"
 GREETING = "Hi, I'm Ollie, how can I help you?"
-WAKE_REPLY = "Yes?"
 THINKING_REPLIES = ("Let me think.", "Hmm, let me think.", "One moment.")
 ```
 
@@ -75,6 +74,8 @@ speech more easily, so watch for false wakes before settling on one.
 | `state.py` | the current picture, as plain data something else can read |
 | `control.py` | the control port — commands in, events out |
 | `supervisor.py` | running the listener, and building it again when asked |
+| `languages.py` | what a language switch changes: models, voice, prompt, phrases |
+| `switch.py` | carrying out a voice or language switch and saving it |
 
 The interface holds the main thread, capture runs on a thread of its own, wake
 scanning on a second, and the large model on a third. The wake scanner keeps
@@ -109,6 +110,9 @@ started in the middle.
 | `set` | change settings — `{"changes": {...}, "apply": true}` |
 | `reset` | forget overrides — `{"names": [...]}`, or all of them |
 | `modules` | what is installed, what it wants reached, what it can do |
+| `voices` | Piper voices for a language — `{"language": "pt"}` or `"pt_BR"` |
+| `set_voice` | download a voice, make it hers, restart — `{"voice": "en_US-amy-medium"}` |
+| `set_language` | switch hearing, replies, phrases and voice, restart — `{"language": "pt"}` |
 | `restart` | rebuild the listener, applying settings |
 | `reload` | replace the process image |
 | `ping` | still there |

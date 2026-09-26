@@ -57,6 +57,9 @@ header on a handshake.
 | `GET /settings` | every setting, its value, its default, and a JSON Schema |
 | `PATCH /settings` | change settings — `{"changes": {...}, "apply": true}` |
 | `POST /settings/reset` | forget overrides — `{"names": [...]}`, or all of them |
+| `GET /voices?language=pt` | Piper voices for a language — `pt`, or `pt_BR` for one region |
+| `PUT /voice` | download a voice, make it hers, restart — `{"voice": "en_US-amy-medium"}` |
+| `PUT /language` | switch hearing, replies, phrases and voice, restart — `{"language": "pt"}` |
 | `GET /modules` | what is installed, what it wants reached, what it can do |
 | `POST /restart` | rebuild the listener, applying settings |
 | `POST /reload` | replace the backend's process image |
@@ -69,6 +72,11 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/js
      -d '{"changes": {"voice": "en_US-amy-medium"}, "apply": true}' \
      localhost:8000/settings
 ```
+
+`PUT /voice` and `PUT /language` answer `202` as soon as the request is checked;
+the download, and for a language the translation, happen afterwards. When they
+finish a `settings` event arrives and she restarts; if they fail, an `error`
+event says why and nothing is changed.
 
 `/docs` is the generated OpenAPI page, which is the fastest way to try any of it.
 

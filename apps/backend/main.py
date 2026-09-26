@@ -25,10 +25,12 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Future
 
 import audio
 import broker
 import control
+import languages
 import model
 import persona
 import settings as settings_module
@@ -196,6 +198,29 @@ def lend_tqdm_a_plain_lock() -> None:
     tqdm.tqdm.set_lock(threading.RLock())
 
 
+def in_background(load: Callable[[], object], log: HitLog, what: str) -> Future:
+    loaded: Future = Future()
+
+    def run() -> None:
+        try:
+            loaded.set_result(load())
+        except Exception as exc:
+            log.error(f"{what} failed to load: {exc}")
+            loaded.set_exception(exc)
+
+    threading.Thread(target=run, daemon=True).start()
+    return loaded
+
+
+def onto_device(whisper_model, device: str, gpu_lock: threading.Lock):
+    for part in whisper_model.modules():
+        if next(part.children(), None) is None:
+            with gpu_lock:
+                part.to(device)
+    with gpu_lock:
+        return whisper_model.to(device)
+
+
 def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     """Load everything and wire it together, reporting progress as it goes.
 
@@ -222,23 +247,21 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     greeting = None
     if chosen.greeting:
         greeting = lambda: talker.say(chosen.greeting, blocking=False)
-    speak = None
-    if chosen.wake_reply:
-        speak = lambda: talker.say(chosen.wake_reply, blocking=False)
     acknowledge = None
-    if persona.THINKING_REPLIES:
+    if chosen.thinking_replies:
         acknowledge = lambda: talker.say(
-            random.choice(persona.THINKING_REPLIES), blocking=False
+            random.choice(chosen.thinking_replies), blocking=False
         )
 
     brain = model.Model(
         name=chosen.llm_model,
         host=chosen.llm_host,
+        system=languages.system_prompt(chosen.language),
         think=chosen.think,
         history_turns=chosen.history_turns,
     )
     progress(f"llm '{chosen.llm_model}' at {chosen.llm_host}")
-    brain.load()
+    in_background(brain.load, log, "llm warm-up")
 
     registry = broker.Registry()
     runner = broker.Runner(python=sys.executable)
@@ -253,7 +276,14 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     progress(f"wake model '{chosen.wake_model}' on {device}")
     wake_model = whisper.load_model(chosen.wake_model, device=device)
     progress(f"question model '{chosen.question_model}' on {device}")
-    question_model = whisper.load_model(chosen.question_model, device=device)
+    gpu_lock = threading.Lock()
+    question_model = in_background(
+        lambda: onto_device(
+            whisper.load_model(chosen.question_model, device="cpu"), device, gpu_lock
+        ),
+        log,
+        "question model",
+    )
 
     return Listener(
         wake_model,
@@ -267,9 +297,10 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
         log=log,
         language=chosen.language if chosen.language != "auto" else None,
         fp16=device in ("cuda", "mps"),
+        gpu_lock=gpu_lock,
         question_timeout=chosen.question_timeout,
         max_no_speech=chosen.wake_confidence,
-        wake_reply=speak,
+        wake_reply=talker.chime,
         muted_until=talker.muted_until,
         on_question=answer_aloud(brain, talker, log, registry, runner),
         acknowledge=acknowledge,
