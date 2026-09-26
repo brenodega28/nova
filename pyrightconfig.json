@@ -4,6 +4,7 @@
   "extraPaths": [
     "apps/sdk/src",
     "apps/api/src",
+    "apps/debug/src",
     "apps/api/.venv/lib/python3.14/site-packages"
   ],
   "typeCheckingMode": "standard",

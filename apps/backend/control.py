@@ -40,6 +40,7 @@ from collections.abc import Callable
 from typing import Any
 
 import broker
+import diagnostics
 import persona
 import settings as settings_module
 from audio import Utterance
@@ -247,6 +248,9 @@ class ControlServer:
 
     def _do_modules(self, args: dict) -> dict:
         return self.modules()
+
+    def _do_diagnostics(self, args: dict) -> dict:
+        return diagnostics.describe(self.supervisor)
 
     def _do_set(self, args: dict) -> dict:
         """Change settings, and say whether anything will happen before a restart."""

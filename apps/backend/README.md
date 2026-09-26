@@ -75,6 +75,7 @@ speech more easily, so watch for false wakes before settling on one.
 | `state.py` | the current picture, as plain data something else can read |
 | `control.py` | the control port — commands in, events out |
 | `supervisor.py` | running the listener, and building it again when asked |
+| `diagnostics.py` | what is loaded and how much memory it holds, for `apps/debug` |
 
 The interface holds the main thread, capture runs on a thread of its own, wake
 scanning on a second, and the large model on a third. The wake scanner keeps
@@ -109,6 +110,7 @@ started in the middle.
 | `set` | change settings — `{"changes": {...}, "apply": true}` |
 | `reset` | forget overrides — `{"names": [...]}`, or all of them |
 | `modules` | what is installed, what it wants reached, what it can do |
+| `diagnostics` | pid, torch device and memory, and which models are loaded — what `apps/debug` draws |
 | `restart` | rebuild the listener, applying settings |
 | `reload` | replace the process image |
 | `ping` | still there |
