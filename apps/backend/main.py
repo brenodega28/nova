@@ -17,7 +17,6 @@ events by the same log, so neither is the authoritative one.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import queue
 import random
@@ -35,6 +34,7 @@ import model
 import persona
 import settings as settings_module
 import state as state_module
+import talk
 from hit_log import HitLog, Tee
 from listener import Listener
 from supervisor import Supervisor
@@ -56,10 +56,10 @@ def resolve_device() -> str:
 
 def answer_aloud(
     brain: model.Model,
-    talker,
+    talker: talk.Talker,
     log: HitLog,
-    registry: broker.Registry | None = None,
-    runner: broker.Runner | None = None,
+    registry: broker.Registry,
+    runner: broker.Runner,
 ) -> Callable[[str], None]:
     """Answer the question, from a module where one fits and from the model where none does.
 
@@ -83,11 +83,9 @@ def answer_aloud(
     """
 
     def say_once(text: str) -> None:
-        hold = talker.speaking() if talker else contextlib.nullcontext()
-        with hold:
+        with talker.speaking():
             log.answer_chunk(text)
-            if talker:
-                talker.say(text, blocking=True)
+            talker.say(text, blocking=True)
 
     recent: dict = {"module": None, "at": 0.0}
 
@@ -99,8 +97,6 @@ def answer_aloud(
         module answered a moment ago, that module gets offered the question. It is
         a guess, and the second return value says so.
         """
-        if registry is None:
-            return None, False
         matched = registry.match(question)
         if matched is not None:
             return matched, False
@@ -110,8 +106,6 @@ def answer_aloud(
         return None, False
 
     def from_module(question: str, started: float) -> bool:
-        if registry is None or runner is None:
-            return False
         module, guessed = route(question)
         if module is None:
             return False
@@ -152,8 +146,7 @@ def answer_aloud(
 
         said: list[str] = []
         failure: Exception | None = None
-        hold = talker.speaking() if talker else contextlib.nullcontext()
-        with hold:
+        with talker.speaking():
             threading.Thread(target=generate, daemon=True).start()
             while True:
                 item = sentences.get()
@@ -164,8 +157,7 @@ def answer_aloud(
                     break
                 said.append(item)
                 log.answer_chunk(item)
-                if talker:
-                    talker.say(item, blocking=True)
+                talker.say(item, blocking=True)
 
         log.answer(" ".join(said), time.time() - started)
         if failure is not None:
@@ -238,8 +230,6 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     if device == "mps":
         os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-    import talk
-
     talker = talk.configure(voice=chosen.voice)
     progress(f"voice '{chosen.voice}'")
     talker.load()
@@ -295,7 +285,7 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
             input_device=chosen.input_device or None,
         ),
         log=log,
-        language=chosen.language if chosen.language != "auto" else None,
+        language=chosen.language if chosen.language != languages.AUTO else None,
         fp16=device in ("cuda", "mps"),
         gpu_lock=gpu_lock,
         question_timeout=chosen.question_timeout,
@@ -308,7 +298,7 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     )
 
 
-def supervised(sinks: list, picture, server) -> Supervisor:
+def supervised(sinks: list, server) -> Supervisor:
     """Tie the log, the listener and the control port into one running thing.
 
     The sinks are every place an event has to reach. They all see the same events,
@@ -341,7 +331,7 @@ def open_control(picture) -> control.ControlServer | None:
     return server
 
 
-def run_interface() -> int:
+def main() -> int:
     import ui
 
     picture = state_module.State()
@@ -352,7 +342,7 @@ def run_interface() -> int:
         sinks.append(state_module.StateLog(picture, persona.WAKE_WORD))
         if server is not None:
             sinks.append(control.ControlLog(server, persona.WAKE_WORD))
-        return supervised(sinks, picture, server)
+        return supervised(sinks, server)
 
     app = ui.AssistantApp(build)
     try:
@@ -362,10 +352,6 @@ def run_interface() -> int:
         if server is not None:
             server.stop()
     return 0
-
-
-def main() -> int:
-    return run_interface()
 
 
 if __name__ == "__main__":

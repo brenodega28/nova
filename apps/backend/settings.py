@@ -45,8 +45,6 @@ import persona
 
 DB_PATH = Path(__file__).resolve().parent / "nova.db"
 
-WHISPER_MODELS = ("tiny.en", "base.en", "small.en", "medium.en", "turbo", "large")
-
 
 def _control(
     default: Any,
@@ -259,7 +257,7 @@ class Store:
                 continue
         return kept
 
-    def write(self, changes: dict[str, Any]) -> "Settings":
+    def write(self, changes: dict[str, Any]) -> Settings:
         """Check the whole set against the model, then keep it. All or nothing.
 
         Validating the merged result rather than each value on its own is what
@@ -281,7 +279,7 @@ class Store:
             )
         return checked
 
-    def clear(self, names: list[str] | None = None) -> "Settings":
+    def clear(self, names: list[str] | None = None) -> Settings:
         """Forget an override, so the constant answers again."""
         with self._lock, self._connect() as db:
             if names is None:
@@ -306,6 +304,11 @@ def store() -> Store:
 def load() -> Settings:
     """The settings as they stand: the constants, with the overrides applied."""
     return Settings()
+
+
+def restart_required(name: str) -> bool:
+    extra = Settings.model_fields[name].json_schema_extra
+    return isinstance(extra, dict) and bool(extra.get("restart_required"))
 
 
 def describe() -> dict[str, Any]:

@@ -153,11 +153,20 @@ class Model:
         with self._lock:
             self._history.clear()
 
-    def _payload(self, messages: list[dict[str, str]], stream: bool) -> dict:
+    def _payload(
+        self, messages: list[dict[str, str]], stream: bool, think: bool | None = None
+    ) -> dict:
         payload = {"model": self.name, "messages": messages, "stream": stream}
         if self.supports_thinking():
-            payload["think"] = self.think
+            payload["think"] = self.think if think is None else think
         return payload
+
+    def _ask(self, payload: dict) -> dict:
+        with self._post("/api/chat", payload) as response:
+            answered = json.load(response)
+        if answered.get("error"):
+            raise ModelError(str(answered["error"]))
+        return answered
 
     def _messages(
         self, question: str, system: str | None = None
@@ -175,9 +184,6 @@ class Model:
         otherwise remember it, and the follow-up "and in Porto?" would have
         nothing to resolve against.
         """
-        self._remember(question, answer)
-
-    def _remember(self, question: str, answer: str) -> None:
         if not answer:
             return
         with self._lock:
@@ -222,7 +228,7 @@ class Model:
         if tail:
             said.append(tail)
             yield tail
-        self._remember(question, " ".join(said))
+        self.remember(question, " ".join(said))
 
     def answer(self, question: str) -> str:
         """Answer ``question`` and return the whole thing."""
@@ -233,14 +239,7 @@ class Model:
             {"role": "system", "content": TRANSLATING.format(language=language)},
             {"role": "user", "content": text},
         ]
-        payload = self._payload(messages, stream=False)
-        if self.supports_thinking():
-            payload["think"] = False
-
-        with self._post("/api/chat", payload) as response:
-            answered = json.load(response)
-        if answered.get("error"):
-            raise ModelError(str(answered["error"]))
+        answered = self._ask(self._payload(messages, stream=False, think=False))
         return speakable((answered.get("message") or {}).get("content") or "")
 
     def decide(self, question: str, tools: list[dict]) -> Decision:
@@ -261,15 +260,11 @@ class Model:
         if not question or not tools:
             return Decision()
 
-        payload = self._payload(self._messages(question, CHOOSING), stream=False)
+        payload = self._payload(
+            self._messages(question, CHOOSING), stream=False, think=False
+        )
         payload["tools"] = tools
-        if self.supports_thinking():
-            payload["think"] = False
-
-        with self._post("/api/chat", payload) as response:
-            answered = json.load(response)
-        if answered.get("error"):
-            raise ModelError(str(answered["error"]))
+        answered = self._ask(payload)
 
         message = answered.get("message") or {}
         calls = message.get("tool_calls") or []

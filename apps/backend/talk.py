@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
 import threading
 import time
 from contextlib import contextmanager
@@ -34,7 +33,7 @@ import sounddevice as sd
 import persona
 
 DEFAULT_VOICE = persona.VOICE
-DEFAULT_DIR = Path(os.path.expanduser("~/.cache/piper"))
+DEFAULT_DIR = Path.home() / ".cache" / "piper"
 SETTLE_SECONDS = 0.3
 SLICE_SECONDS = 0.05
 SHUTDOWN_SECONDS = 2.0
@@ -119,10 +118,6 @@ class Talker:
 
                 self._voice = PiperVoice.load(self._model_path())
             return self._voice
-
-    @property
-    def sample_rate(self) -> int:
-        return self.load().config.sample_rate
 
     def is_speaking(self) -> bool:
         with self._state_lock:

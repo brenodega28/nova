@@ -48,7 +48,6 @@ class Utterance:
     started_at: float
     duration: float
     captured_at: float
-    partial: bool = False
 
 
 def list_devices() -> str:
@@ -177,7 +176,6 @@ class AudioCapture:
                                 started_at,
                                 len(tail) * BLOCK_SECONDS,
                                 time.time(),
-                                partial=True,
                             )
                         )
 

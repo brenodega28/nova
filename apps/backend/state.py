@@ -124,7 +124,7 @@ class StateLog(HitLog):
             self.state._note("wake", f"woke on '{self.wake_word}' #{self.hits}")
         self._append("wake", utterance, text, latency=latency)
 
-    def question(self, utterance: Utterance, text: str) -> None:
+    def question(self, utterance: Utterance | None, text: str) -> None:
         with self.state._lock:
             self.state.speaking_text = ""
             self.state.turns.append(

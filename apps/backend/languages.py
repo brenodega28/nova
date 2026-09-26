@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import model
 import persona
 import talk
+
+if TYPE_CHECKING:
+    from settings import Settings
 
 ENGLISH = "en"
 AUTO = "auto"
@@ -45,8 +48,8 @@ def voice_for(code: str, current: str) -> str:
     return (medium or voices)[0]
 
 
-def changes_for(code: str, current: Any) -> dict[str, Any]:
-    changes = {
+def changes_for(code: str, current: Settings) -> dict[str, Any]:
+    changes: dict[str, Any] = {
         "language": code,
         "voice": voice_for(code, current.voice),
         "wake_model": whisper_model_for(current.wake_model, code),

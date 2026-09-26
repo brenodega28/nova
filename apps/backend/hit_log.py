@@ -81,7 +81,7 @@ class HitLog:
         )
         self._append("wake", utterance, text, latency=latency)
 
-    def question(self, utterance: Utterance, text: str) -> None:
+    def question(self, utterance: Utterance | None, text: str) -> None:
         print(f"  {BOLD}?{RESET} {text}\n", flush=True)
         self._append("question", utterance, text)
 

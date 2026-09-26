@@ -24,9 +24,6 @@ import threading
 from collections.abc import Callable
 from typing import Protocol
 
-import persona
-import switch
-import talk
 from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Center, VerticalScroll
@@ -36,7 +33,12 @@ from textual.reactive import reactive
 from textual.theme import Theme
 from textual.widgets import Footer, Input, Static
 
+import persona
+import switch
+import talk
 from hit_log import HitLog
+from state import BROKEN, IDLE, LISTENING, LOADING, SPEAKING, THINKING
+
 
 class Listening(Protocol):
     """What the interface needs of a listener: run it, and ask it to stop.
@@ -55,13 +57,6 @@ class Listening(Protocol):
 
     def reload(self) -> None: ...
 
-
-LOADING = "loading"
-IDLE = "idle"
-LISTENING = "listening"
-THINKING = "thinking"
-SPEAKING = "speaking"
-BROKEN = "broken"
 
 HEAD = """\
     ╭╮       ╭╮
@@ -265,8 +260,14 @@ class AssistantApp(App):
                 return
             self.listener.run()
         except Exception as exc:
-            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
-            self.post_message(Draw(self.set_state, (BROKEN,)))
+            self._draw_failure(exc)
+            self._draw(self.set_state, BROKEN)
+
+    def _draw(self, action: Callable, *args) -> None:
+        self.post_message(Draw(action, args))
+
+    def _draw_failure(self, exc: Exception) -> None:
+        self._draw(self.add_error, f"{type(exc).__name__}: {exc}")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -302,14 +303,16 @@ class AssistantApp(App):
         elif name == "set-language":
             self.add_system(f"switching to '{argument}'")
             threading.Thread(
-                target=self._set_language, args=(argument.lower(),), daemon=True
+                target=self._set_language,
+                args=(self.listener, argument.lower()),
+                daemon=True,
             ).start()
         elif name == "set-voice" and not argument:
             self.add_error("which voice? e.g. /set-voice en_US-amy-medium")
         elif name == "set-voice":
             self.add_system(f"downloading voice '{argument}'")
             threading.Thread(
-                target=self._set_voice, args=(argument,), daemon=True
+                target=self._set_voice, args=(self.listener, argument), daemon=True
             ).start()
         else:
             self.add_error(f"unknown command /{name} — try /restart, /reload, /list-voices, /set-voice, /set-language or /quit")
@@ -318,39 +321,35 @@ class AssistantApp(App):
         try:
             voices = talk.available_voices(language)
         except Exception as exc:
-            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            self._draw_failure(exc)
             return
         if not voices:
-            self.post_message(Draw(self.add_error, (f"no voices for '{language}'",)))
+            self._draw(self.add_error, f"no voices for '{language}'")
             return
         summary = f"{len(voices)} {language} voices"
-        self.post_message(Draw(self.add_system, ("\n  ".join([summary, *voices]),)))
+        self._draw(self.add_system, "\n  ".join([summary, *voices]))
 
-    def _set_voice(self, voice: str) -> None:
+    def _set_voice(self, listener: Listening, voice: str) -> None:
         try:
             switch.voice(voice)
         except Exception as exc:
-            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            self._draw_failure(exc)
             return
-        self.post_message(Draw(self.add_system, (f"voice set to '{voice}' — restarting",)))
-        self.listener.restart()
+        self._draw(self.add_system, f"voice set to '{voice}' — restarting")
+        listener.restart()
 
-    def _set_language(self, code: str) -> None:
+    def _set_language(self, listener: Listening, code: str) -> None:
         try:
             changes = switch.language(code)
         except Exception as exc:
-            self.post_message(Draw(self.add_error, (f"{type(exc).__name__}: {exc}",)))
+            self._draw_failure(exc)
             return
-        self.post_message(
-            Draw(
-                self.add_system,
-                (
-                    f"language set to '{code}', voice '{changes['voice']}', "
-                    f"wake model '{changes['wake_model']}' — restarting",
-                ),
-            )
+        self._draw(
+            self.add_system,
+            f"language set to '{code}', voice '{changes['voice']}', "
+            f"wake model '{changes['wake_model']}' — restarting",
         )
-        self.listener.restart()
+        listener.restart()
 
     def action_shutdown(self) -> None:
         self.request_stop()
@@ -361,9 +360,6 @@ class AssistantApp(App):
 
     def set_state(self, state: str) -> None:
         self.face.state = state
-
-    def add_setup(self, text: str) -> None:
-        self.chat.say(f"· {escape(text)}", "system")
 
     def add_system(self, text: str) -> None:
         self.chat.say(f"· {escape(text)}", "system")
@@ -387,26 +383,22 @@ class AssistantApp(App):
         self._answer_text = ""
         self.chat.say(f"[b]you[/b]  {escape(text)}", "you")
 
+    def _reply_markup(self) -> str:
+        return f"[b]{self.assistant_name}[/b]  {escape(self._answer_text)}"
+
     def add_answer_chunk(self, text: str) -> None:
         self.set_state(SPEAKING)
         self._answer_text = f"{self._answer_text} {text}".strip()
         if self._answer is None:
-            self._answer = self.chat.say(
-                f"[b]{self.assistant_name}[/b]  {escape(self._answer_text)}", "reply"
-            )
+            self._answer = self.chat.say(self._reply_markup(), "reply")
         else:
-            self._answer.update(
-                f"[b]{self.assistant_name}[/b]  {escape(self._answer_text)}"
-            )
+            self._answer.update(self._reply_markup())
             self.chat.scroll_end(animate=False)
 
     def finish_answer(self, elapsed: float) -> None:
         self.set_state(IDLE)
         if self._answer is not None:
-            self._answer.update(
-                f"[b]{self.assistant_name}[/b]  {escape(self._answer_text)}"
-                f"  [dim]({elapsed:.1f}s)[/dim]"
-            )
+            self._answer.update(f"{self._reply_markup()}  [dim]({elapsed:.1f}s)[/dim]")
         self._answer = None
         self._answer_text = ""
 
@@ -432,7 +424,7 @@ class UiLog(HitLog):
         self._post(self.app.set_state, LOADING)
 
     def setup(self, text: str) -> None:
-        self._post(self.app.add_setup, text)
+        self._post(self.app.add_system, text)
 
     def ready(self, floor: float, threshold: float) -> None:
         self._post(self.app.show_ready, floor, threshold)

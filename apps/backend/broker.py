@@ -36,7 +36,6 @@ import subprocess
 import sys
 import time
 import tomllib
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -107,9 +106,6 @@ class Installed:
     @property
     def entry(self) -> Path:
         return self.directory / ENTRY_NAME
-
-    def qualified(self, tool: str) -> str:
-        return f"{self.name}.{tool}"
 
 
 def read_manifest(directory: Path) -> Installed:
@@ -246,10 +242,6 @@ class Call:
     error: str | None
     seconds: float
 
-    @property
-    def qualified(self) -> str:
-        return f"{self.module}.{self.tool}"
-
 
 class Runner:
     """Runs one tool, in its own process, and brings back one answer."""
@@ -258,11 +250,9 @@ class Runner:
         self,
         sandbox: Sandbox | None = None,
         python: str = sys.executable,
-        log: Callable[[Call], None] | None = None,
     ):
         self.sandbox = sandbox or Direct()
         self.python = python
-        self.log = log
         self._offered: dict[str, list[dict]] = {}
 
     def _spawn(self, module: Installed, argv: list[str], stdin: str, timeout: float):
@@ -310,27 +300,32 @@ class Runner:
         try:
             done = self._spawn(module, [], request, module.grants.timeout)
         except subprocess.TimeoutExpired:
-            return self._finish(
+            return self._failed(
                 module,
                 tool,
                 args,
                 started,
-                False,
                 f"{module.name} took longer than {module.grants.timeout:g}s",
                 f"{module.name} took too long.",
-                {},
             )
         except OSError as exc:
-            return self._finish(
-                module, tool, args, started, False, str(exc),
-                f"I couldn't start {module.name}.", {},
+            return self._failed(
+                module,
+                tool,
+                args,
+                started,
+                str(exc),
+                f"I couldn't start {module.name}.",
             )
 
         if len(done.stdout) > MAX_OUTPUT:
-            return self._finish(
-                module, tool, args, started, False,
+            return self._failed(
+                module,
+                tool,
+                args,
+                started,
                 f"{module.name} wrote more than {MAX_OUTPUT} bytes",
-                f"{module.name} said far too much.", {},
+                f"{module.name} said far too much.",
             )
 
         try:
@@ -338,10 +333,13 @@ class Runner:
         except ValueError:
             lines = (done.stderr or done.stdout or "").strip().splitlines()
             detail = lines[-1][:MAX_DETAIL] if lines else "nothing"
-            return self._finish(
-                module, tool, args, started, False,
+            return self._failed(
+                module,
+                tool,
+                args,
+                started,
                 f"{module.name} did not answer with JSON: {detail}",
-                f"{module.name} gave me nothing I could read.", {},
+                f"{module.name} gave me nothing I could read.",
             )
 
         return self._accept(module, tool, args, started, envelope)
@@ -351,10 +349,13 @@ class Runner:
     ) -> Call:
         """Take a module's envelope apart without trusting its shape."""
         if not isinstance(envelope, dict):
-            return self._finish(
-                module, tool, args, started, False,
+            return self._failed(
+                module,
+                tool,
+                args,
+                started,
                 "the answer was not an object",
-                f"{module.name} gave me a strange answer.", {},
+                f"{module.name} gave me a strange answer.",
             )
 
         speech = envelope.get("speech")
@@ -366,10 +367,13 @@ class Runner:
         ok = bool(envelope.get("ok"))
 
         if ok and not speech:
-            return self._finish(
-                module, tool, args, started, False,
+            return self._failed(
+                module,
+                tool,
+                args,
+                started,
                 f"{module.name} answered ok but said nothing",
-                f"{module.name} had nothing to say.", {},
+                f"{module.name} had nothing to say.",
             )
 
         return self._finish(
@@ -383,6 +387,17 @@ class Runner:
             data if isinstance(data, dict) else {},
         )
 
+    def _failed(
+        self,
+        module: Installed,
+        tool: str,
+        args: dict,
+        started: float,
+        error: str,
+        speech: str,
+    ) -> Call:
+        return self._finish(module, tool, args, started, False, error, speech, {})
+
     def _finish(
         self,
         module: Installed,
@@ -394,7 +409,7 @@ class Runner:
         speech: str,
         data: dict,
     ) -> Call:
-        made = Call(
+        return Call(
             module=module.name,
             tool=tool,
             args=args,
@@ -404,9 +419,6 @@ class Runner:
             error=error,
             seconds=round(time.monotonic() - started, 3),
         )
-        if self.log:
-            self.log(made)
-        return made
 
 
 def _cli(argv: list[str]) -> int:

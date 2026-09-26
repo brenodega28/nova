@@ -39,6 +39,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import ValidationError
+
 import broker
 import languages
 import persona
@@ -70,12 +72,10 @@ class Client:
     catches up — is not a trade anyone would choose.
     """
 
-    def __init__(self, connection: socket.socket, address):
+    def __init__(self, connection: socket.socket):
         self.connection = connection
-        self.address = address
         self.authenticated = not TOKEN
         self.pending: list[str] = []
-        self.dropped = 0
         self.alive = True
         self._ready = threading.Condition()
 
@@ -86,7 +86,6 @@ class Client:
                 return
             if len(self.pending) >= QUEUED_EVENTS:
                 self.pending.pop(0)
-                self.dropped += 1
             self.pending.append(line)
             self._ready.notify()
 
@@ -121,7 +120,7 @@ class ControlServer:
         self._clients_lock = threading.Lock()
         self._server: socketserver.ThreadingTCPServer | None = None
         self._registry: broker.Registry | None = None
-        self._runner: broker.Runner | None = None
+        self._runner = broker.Runner()
 
     def start(self) -> None:
         """Open the port on a thread of its own. Never blocks the caller."""
@@ -151,7 +150,7 @@ class ControlServer:
 
     def publish(self, event: str, data: dict | None = None) -> None:
         """Send one event to everyone attached and authenticated."""
-        frame = {"event": event, "at": time.time(), "data": data or {}}
+        frame = _event_frame(event, data or {})
         with self._clients_lock:
             clients = list(self.clients)
         for client in clients:
@@ -177,7 +176,6 @@ class ControlServer:
         """
         if self._registry is None:
             self._registry = broker.Registry()
-            self._runner = broker.Runner()
         self._registry.discover()
         described = []
         for module in self._registry.modules.values():
@@ -220,10 +218,7 @@ class ControlServer:
             raise Refused("args must be an object")
 
         if name == "authenticate":
-            if not TOKEN:
-                client.authenticated = True
-                return {"authenticated": True}
-            if args.get("token") != TOKEN:
+            if TOKEN and args.get("token") != TOKEN:
                 raise Refused("that token is not the one this backend was given")
             client.authenticated = True
             return {"authenticated": True}
@@ -268,9 +263,7 @@ class ControlServer:
             raise Refused(_why_it_will_not_take(exc)) from exc
 
         needs_restart = sorted(
-            name
-            for name in changes
-            if (known[name].json_schema_extra or {}).get("restart_required")
+            name for name in changes if settings_module.restart_required(name)
         )
         applied = False
         if args.get("apply") and needs_restart and self.supervisor is not None:
@@ -286,27 +279,24 @@ class ControlServer:
         }
 
     def _do_voices(self, args: dict) -> dict:
-        language = args.get("language")
-        if not isinstance(language, str) or not language.strip():
-            raise Refused("voices needs a 'language', like 'en' or 'pt_BR'")
-        language = language.strip()
+        language = _text_arg(
+            args, "language", "voices needs a 'language', like 'en' or 'pt_BR'"
+        )
         return {"language": language, "voices": talk.available_voices(language)}
 
     def _do_set_voice(self, args: dict) -> dict:
-        voice = args.get("voice")
-        if not isinstance(voice, str) or not voice.strip():
-            raise Refused("set_voice needs a 'voice', like 'en_US-amy-medium'")
-        voice = voice.strip()
+        voice = _text_arg(
+            args, "voice", "set_voice needs a 'voice', like 'en_US-amy-medium'"
+        )
         if voice not in talk.catalog():
             raise Refused(f"no voice named {voice!r} — see voices")
         self._switch_in_background("voice", switch.voice, voice)
         return {"switching": True, "voice": voice}
 
     def _do_set_language(self, args: dict) -> dict:
-        code = args.get("language")
-        if not isinstance(code, str) or not code.strip():
-            raise Refused("set_language needs a 'language', like 'pt' or 'en'")
-        code = code.strip().lower()
+        code = _text_arg(
+            args, "language", "set_language needs a 'language', like 'pt' or 'en'"
+        ).lower()
         try:
             languages.name_of(code)
         except ValueError as exc:
@@ -355,14 +345,24 @@ class ControlServer:
         return {"reloading": True}
 
 
+def _event_frame(event: str, data: dict) -> dict:
+    return {"event": event, "at": time.time(), "data": data}
+
+
+def _text_arg(args: dict, key: str, missing: str) -> str:
+    value = args.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise Refused(missing)
+    return value.strip()
+
+
 def _why_it_will_not_take(exc: Exception) -> str:
     """Turn a validation failure into one line somebody can act on."""
-    errors = getattr(exc, "errors", None)
-    if not callable(errors):
+    if not isinstance(exc, ValidationError) or not exc.errors():
         return str(exc)
-    first = (errors() or [{}])[0]
-    where = ".".join(str(part) for part in first.get("loc", ())) or "that setting"
-    return f"{where}: {first.get('msg', 'is not allowed')}"
+    first = exc.errors()[0]
+    where = ".".join(str(part) for part in first["loc"]) or "that setting"
+    return f"{where}: {first['msg']}"
 
 
 def _handler_for(server: "ControlServer"):
@@ -370,16 +370,16 @@ def _handler_for(server: "ControlServer"):
         """One connection: a thread reading commands, another writing events."""
 
         def handle(self) -> None:
-            client = Client(self.request, self.client_address)
+            client = Client(self.request)
             self.request.settimeout(WRITE_TIMEOUT)
             server.attach(client)
             writer = threading.Thread(target=self._write, args=(client,), daemon=True)
             writer.start()
             try:
                 if client.authenticated:
-                    client.send({"event": "hello", "at": time.time(), "data": server.greeting()})
+                    client.send(_event_frame("hello", server.greeting()))
                 else:
-                    client.send({"event": "challenge", "at": time.time(), "data": {}})
+                    client.send(_event_frame("challenge", {}))
                 self._read(client)
             finally:
                 server.detach(client)
@@ -480,7 +480,7 @@ class ControlLog(HitLog):
             "wake", {"text": text, "latency": latency, "count": self.hits}
         )
 
-    def question(self, utterance: Utterance, text: str) -> None:
+    def question(self, utterance: Utterance | None, text: str) -> None:
         self.server.publish("question", {"text": text})
 
     def thinking(self) -> None:

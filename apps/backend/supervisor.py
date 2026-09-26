@@ -33,6 +33,7 @@ import time
 from collections.abc import Callable
 
 from hit_log import HitLog
+from listener import Listener
 
 REBUILD_PAUSE = 0.5
 
@@ -40,15 +41,14 @@ REBUILD_PAUSE = 0.5
 class Supervisor:
     """Builds a listener, runs it, and builds another when asked to."""
 
-    def __init__(self, build: Callable[[], object], log: HitLog):
+    def __init__(self, build: Callable[[], Listener], log: HitLog):
         self.build = build
         self.log = log
         self.stop_event = threading.Event()
-        self.listener = None
+        self.listener: Listener | None = None
         self.generation = 0
         self._restarting = threading.Event()
         self._reloading = threading.Event()
-        self._running = threading.Event()
 
     def restart(self) -> None:
         """Drop the current listener and build a fresh one. Never blocks.
@@ -72,9 +72,6 @@ class Supervisor:
         listener.ask(text)
         return True
 
-    def wait_until_running(self, timeout: float = 120.0) -> bool:
-        return self._running.wait(timeout)
-
     def _handover(self) -> None:
         """Stand the process up again from scratch, in place.
 
@@ -92,11 +89,10 @@ class Supervisor:
         while True:
             self.stop_event.clear()
             self._restarting.clear()
-            self._running.clear()
 
             self.log.starting()
             try:
-                self.listener = self.build()
+                self.listener = listener = self.build()
             except Exception as exc:
                 self.listener = None
                 self.log.broken(f"{type(exc).__name__}: {exc}")
@@ -104,13 +100,11 @@ class Supervisor:
                     return 1
                 continue
 
-            self.listener.stop_event = self.stop_event
+            listener.stop_event = self.stop_event
             self.generation += 1
-            self._running.set()
             try:
-                self.listener.run()
+                listener.run()
             finally:
-                self._running.clear()
                 self.listener = None
 
             if self._reloading.is_set():
