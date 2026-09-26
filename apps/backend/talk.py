@@ -1,13 +1,13 @@
 """Speech out: Piper neural text to speech, played straight to the speakers.
 
     import talk
-    talk.say("Yes?")
+    talk.Talker().say("Yes?")
 
 Synthesis is roughly fifty times faster than real time, so a short reply starts
 playing within a couple of hundred milliseconds of the call.
 
 The microphone hears whatever comes out of the speakers, so a listener needs to
-know when to stop trusting its input. :func:`muted_until` reports the moment
+know when to stop trusting its input. :meth:`Talker.muted_until` reports the moment
 audio becomes trustworthy again — while a reply is playing it is infinite, and
 once playback ends it is the end time plus a short settling margin.
 
@@ -119,10 +119,6 @@ class Talker:
                 self._voice = PiperVoice.load(self._model_path())
             return self._voice
 
-    def is_speaking(self) -> bool:
-        with self._state_lock:
-            return self._speakers > 0
-
     def muted_until(self) -> float:
         """Timestamp after which microphone audio is trustworthy again."""
         with self._state_lock:
@@ -211,44 +207,7 @@ class Talker:
                     self._quiet_since = time.time()
 
 
-_default: Talker | None = None
-_default_lock = threading.Lock()
-
-
-def default_talker() -> Talker:
-    global _default
-    with _default_lock:
-        if _default is None:
-            _default = Talker()
-        return _default
-
-
-def configure(**kwargs) -> Talker:
-    """Replace the shared talker, e.g. to pick a different voice."""
-    global _default
-    with _default_lock:
-        _default = Talker(**kwargs)
-        return _default
-
-
-def say(text: str, blocking: bool = True) -> None:
-    """Speak ``text`` aloud."""
-    default_talker().say(text, blocking=blocking)
-
-
-def is_speaking() -> bool:
-    return default_talker().is_speaking()
-
-
-def muted_until() -> float:
-    return default_talker().muted_until()
-
-
-def stop() -> None:
-    default_talker().stop()
-
-
 if __name__ == "__main__":
     import sys
 
-    say(" ".join(sys.argv[1:]) or "Yes? I am listening.")
+    Talker().say(" ".join(sys.argv[1:]) or "Yes? I am listening.")

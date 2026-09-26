@@ -50,10 +50,6 @@ class Utterance:
     captured_at: float
 
 
-def list_devices() -> str:
-    return str(sd.query_devices())
-
-
 class VoiceActivityDetector:
     """Energy gate calibrated against the ambient noise floor.
 

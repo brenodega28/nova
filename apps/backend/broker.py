@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Protocol
 
 from sdk import ENTRY_NAME, MANIFEST_NAME, SUPPORTED_MANIFEST
+from text import normalize
 
 MODULES_DIR = Path.home() / ".nova" / "apps"
 MAX_OUTPUT = 256 * 1024
@@ -143,11 +144,6 @@ def read_manifest(directory: Path) -> Installed:
         grants=Grants.read_from(manifest.get("grants") or {}),
         settings=manifest.get("settings") or {},
     )
-
-
-def normalize(said: str) -> str:
-    said = said.lower().replace("’", "'")
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9'\s]", " ", said)).strip()
 
 
 class Registry:

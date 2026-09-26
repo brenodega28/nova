@@ -10,10 +10,8 @@ Capture runs on whichever thread calls :meth:`Listener.run`, wake scanning on a
 second, and the question transcription on a third. The wake scanner keeps only
 the newest partial, so a slow pass never leaves it working through stale audio.
 
-Which Whisper models do the two jobs is set here: a small one to spot the wake
-word inside a fraction of a second, a large one to transcribe the question, where
-accuracy matters and latency does not. On a machine without a GPU the large one
-costs seconds, and ``turbo`` is the trade to make.
+Which Whisper models do the two jobs is set here. On a machine without a GPU the
+large one costs seconds, and ``turbo`` is the trade to make.
 
 Interrupt handling is installed only when :meth:`Listener.run` is called on the
 main thread, since signals cannot be registered anywhere else — under a UI that
@@ -34,6 +32,7 @@ from concurrent.futures import Future
 import persona
 from audio import AudioCapture, Utterance
 from hit_log import HitLog
+from text import normalize
 
 WAKE_MODEL = "base.en"
 QUESTION_MODEL = "large"
@@ -66,15 +65,9 @@ class WakeWordMatcher:
             r"\b(" + "|".join(re.escape(v) for v in spellings) + r")\b"
         )
 
-    @staticmethod
-    def normalize(text: str) -> str:
-        text = text.lower().replace("’", "'")
-        text = re.sub(r"[^a-z0-9'\s]", " ", text)
-        return re.sub(r"\s+", " ", text).strip()
-
     def find(self, text: str) -> tuple[int, int] | None:
         """Return the (start, end) span of the wake word in normalized text."""
-        normalized = self.normalize(text)
+        normalized = normalize(text)
         if not normalized:
             return None
 
@@ -95,7 +88,7 @@ class WakeWordMatcher:
         span = self.find(text)
         if span is None:
             return ""
-        return self.normalize(text)[span[1]:].strip(" ,.!?")
+        return normalize(text)[span[1]:].strip(" ,.!?")
 
 
 class LatestSlot:

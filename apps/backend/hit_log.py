@@ -153,9 +153,7 @@ class Tee(HitLog):
     the inherited method and silently prints to a console nobody is reading.
 
     A sink that does not implement something is skipped rather than crashing the
-    caller, since the base :class:`HitLog` has no ``setup`` or ``broken`` and is
-    still a perfectly good sink. One sink raising must not rob the others of the
-    event either — a dashboard client that went away mid-write is a normal thing
+    caller. One sink raising must not rob the others of the event either — a dashboard client that went away mid-write is a normal thing
     to happen, and not a reason for the conversation to stop being drawn.
     """
 

@@ -22,7 +22,7 @@ ollie: "I can't check live weather…"
 ```
 
 The microphone hears her own voice, so capture is gated while she speaks:
-`talk.muted_until()` reports when input can be trusted again, and the listener
+`Talker.muted_until()` reports when input can be trusted again, and the listener
 throws away anything captured before then. The trade-off is no barge-in — wait
 for her to finish before asking.
 
@@ -208,8 +208,6 @@ brain = model.Model("qwen3:14b")
 brain.load()                          # pull the weights into memory up front
 for sentence in brain.stream("Why is the sky blue?"):
     print(sentence)                   # one complete sentence at a time
-brain.answer("And at sunset?")        # the whole thing, remembering the last turn
-brain.forget()                        # drop the conversation
 ```
 
 `stream()` yields whole sentences rather than tokens, because the point is to
@@ -254,11 +252,11 @@ work as long as you wake her again for each one.
 ```python
 import talk
 
-talk.say("Yes?")                      # blocks until the audio finishes
-talk.say("Long answer…", blocking=False)  # queued, never talks over the last
-talk.stop()                           # cut it off
-talk.is_speaking()                    # True while audio is playing
-talk.muted_until()                    # inf while speaking, else quiet-since + 0.3s
+talker = talk.Talker()
+talker.say("Yes?")                      # blocks until the audio finishes
+talker.say("Long answer…", blocking=False)  # queued, never talks over the last
+talker.stop()                           # cut it off
+talker.muted_until()                    # inf while speaking, else quiet-since + 0.3s
 ```
 
 The greeting waits for the noise-floor calibration to finish rather than leading
@@ -343,7 +341,7 @@ QUESTION_MODEL = "large"  # seconds per question on CPU; turbo is the trade
 To list microphones:
 
 ```sh
-uv run python -c "import audio; print(audio.list_devices())"
+uv run python -m sounddevice
 ```
 
 ## Tuning

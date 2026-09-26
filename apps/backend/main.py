@@ -230,7 +230,7 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
     if device == "mps":
         os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-    talker = talk.configure(voice=chosen.voice)
+    talker = talk.Talker(voice=chosen.voice)
     progress(f"voice '{chosen.voice}'")
     talker.load()
 

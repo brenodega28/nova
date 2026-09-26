@@ -149,10 +149,6 @@ class Model:
         with self._post("/api/chat", payload) as response:
             json.load(response)
 
-    def forget(self) -> None:
-        with self._lock:
-            self._history.clear()
-
     def _payload(
         self, messages: list[dict[str, str]], stream: bool, think: bool | None = None
     ) -> dict:
@@ -229,10 +225,6 @@ class Model:
             said.append(tail)
             yield tail
         self.remember(question, " ".join(said))
-
-    def answer(self, question: str) -> str:
-        """Answer ``question`` and return the whole thing."""
-        return " ".join(self.stream(question))
 
     def translate(self, text: str, language: str) -> str:
         messages = [
