@@ -295,6 +295,7 @@ def assemble(log: HitLog, progress: Callable[[str], None]) -> Listener:
         on_question=answer_aloud(brain, talker, log, registry, runner),
         acknowledge=acknowledge,
         greeting=greeting,
+        talker=talker,
     )
 
 

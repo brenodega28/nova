@@ -76,6 +76,7 @@ speech more easily, so watch for false wakes before settling on one.
 | `supervisor.py` | running the listener, and building it again when asked |
 | `languages.py` | what a language switch changes: models, voice, prompt, phrases |
 | `switch.py` | carrying out a voice or language switch and saving it |
+| `diagnostics.py` | what is loaded and how much memory it holds, for `apps/debug` |
 
 The interface holds the main thread, capture runs on a thread of its own, wake
 scanning on a second, and the large model on a third. The wake scanner keeps
@@ -113,6 +114,7 @@ started in the middle.
 | `voices` | Piper voices for a language — `{"language": "pt"}` or `"pt_BR"` |
 | `set_voice` | download a voice, make it hers, restart — `{"voice": "en_US-amy-medium"}` |
 | `set_language` | switch hearing, replies, phrases and voice, restart — `{"language": "pt"}` |
+| `diagnostics` | pid, torch device and memory, and which models are loaded — what `apps/debug` draws |
 | `restart` | rebuild the listener, applying settings |
 | `reload` | replace the process image |
 | `ping` | still there |

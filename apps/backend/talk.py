@@ -119,6 +119,10 @@ class Talker:
                 self._voice = PiperVoice.load(self._model_path())
             return self._voice
 
+    def is_speaking(self) -> bool:
+        with self._state_lock:
+            return self._speakers > 0
+
     def muted_until(self) -> float:
         """Timestamp after which microphone audio is trustworthy again."""
         with self._state_lock:

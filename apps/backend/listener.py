@@ -32,6 +32,7 @@ from concurrent.futures import Future
 import persona
 from audio import AudioCapture, Utterance
 from hit_log import HitLog
+from talk import Talker
 from text import normalize
 
 WAKE_MODEL = "base.en"
@@ -140,6 +141,7 @@ class Listener:
         on_question: Callable[[str], None] | None = None,
         acknowledge: Callable[[], None] | None = None,
         greeting: Callable[[], None] | None = None,
+        talker: Talker | None = None,
     ):
         self.wake_model = wake_model
         self.question_model = question_model
@@ -158,6 +160,7 @@ class Listener:
         self.on_question = on_question
         self.acknowledge = acknowledge
         self.greeting = greeting
+        self.talker = talker
 
         self.partials = LatestSlot()
         self.utterances: queue.Queue[Utterance | str | None] = queue.Queue()
